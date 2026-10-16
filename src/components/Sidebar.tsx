@@ -26,8 +26,33 @@ interface Props {
   onToast: (msg: string) => void;
 }
 
-const sameQuery = (a: ArticleQuery, b: ArticleQuery) =>
-  JSON.stringify(a) === JSON.stringify(b);
+const sameQuery = (a: ArticleQuery, b: ArticleQuery) =>  JSON.stringify(a) === JSON.stringify(b);
+
+/** Return `list` with the members of one group re-sequenced to `orderedIds`,
+ *  leaving every other row untouched. The sidebar renders each group by
+ *  filtering this flat list, so only the relative order *inside* a group is
+ *  ever visible — which is also why a reorder never renumbers other groups. */
+const applyGroupOrder = (
+  list: Feed[],
+  folderId: number | null,
+  orderedIds: number[],
+): Feed[] => {
+  const rank = new Map(orderedIds.map((id, i) => [id, i]));
+  const slots: number[] = [];
+  const items: Feed[] = [];
+  list.forEach((f, i) => {
+    if (f.folderId === folderId) {
+      slots.push(i);
+      items.push(f);
+    }
+  });
+  items.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+  const next = [...list];
+  slots.forEach((slot, i) => {
+    next[slot] = items[i];
+  });
+  return next;
+};
 
 /** Enter / Space activator for a div that behaves as a button — gives the
  *  sidebar's clickable rows keyboard parity with their onClick. */
@@ -121,6 +146,21 @@ export default function Sidebar({
   const [dropFolder, setDropFolder] = useState<number | "none" | null>(null);
   const [tagDragId, setTagDragId] = useState<number | null>(null);
   const [tagOverId, setTagOverId] = useState<number | null>(null);
+  // Precise insertion point of a feed drag: the row the drop lands *before*,
+  // or `null` for "end of that group". `dropFolder` above stays the
+  // whole-container highlight, used when the pointer is over a group but not
+  // over any row (an empty folder, the gap below the last row).
+  const [dropAt, setDropAt] = useState<{
+    folderId: number | null;
+    beforeId: number | null;
+  } | null>(null);
+  // Folder reordering keeps its own drag state so the two drags can never
+  // collide: each handler only reacts to its own `…DragId`.
+  const [folderDragId, setFolderDragId] = useState<number | null>(null);
+  const [folderDrop, setFolderDrop] = useState<{
+    id: number;
+    below: boolean;
+  } | null>(null);
 
   // Feed/folder/tag mutations only touch the article-bearing caches — a bare
   // invalidateQueries() would also refetch AI summaries, settings and storage
@@ -243,20 +283,128 @@ export default function Sidebar({
   const visibleFeeds = allFeeds.filter(feedVisible);
   const ungrouped = visibleFeeds.filter((f) => f.folderId == null);
 
-  // ── drag to move a feed between folders ──
-  const handleDrop = (target: number | null) => {
+  // ── drag to reorder a feed, or refile it at a precise spot ──
+  //
+  // Optimistically apply a new order, then persist and reconcile on either
+  // outcome. Mirrors `persistTagOrder`; the toast is only for a refile, since
+  // a pure reorder is visible in place and needs no confirmation.
+  const persistFeedOrder = (
+    next: Feed[],
+    call: Promise<unknown>,
+    ok?: string,
+  ) => {
+    qc.setQueryData(["feeds"], next);
+    call
+      .then(() => {
+        actions.refreshAfterBulk();
+        if (ok) onToast(ok);
+      })
+      .catch((e) => reportError(e));
+  };
+
+  // `folderId` + `beforeId` fully describe a feed drop: land immediately
+  // before `beforeId` inside `folderId`, or at the end of that group when
+  // `beforeId` is null. Fed by a drop on a row (precise place) and by a drop
+  // on a group container (append).
+  const dropFeed = (folderId: number | null, beforeId: number | null) => {
     const feed = allFeeds.find((f) => f.id === dragId);
     setDragId(null);
     setDropFolder(null);
-    if (!feed || feed.folderId === target) return;
-    const folderName =
-      target == null
-        ? t("sidebar.uncategorized")
-        : allFolders.find((f) => f.id === target)?.name ?? "";
-    guard(
-      api.moveFeed(feed.id, target),
-      t("sidebar.toastMoved", { feed: feed.title, folder: folderName }),
+    setDropAt(null);
+    if (!feed) return;
+
+    // The destination group *without* the dragged feed — it is re-inserted at
+    // the drop point, so a same-group reorder can never duplicate it.
+    const rest = allFeeds.filter(
+      (f) => f.folderId === folderId && f.id !== feed.id,
     );
+    const at =
+      beforeId == null ? rest.length : rest.findIndex((f) => f.id === beforeId);
+    // `beforeId` should always be in `rest` (the drop handler checked the
+    // group), but fall back to the end rather than the start if it is not —
+    // that matches "insert where that row used to be".
+    const insertAt = at < 0 ? rest.length : at;
+    const ordered = [...rest];
+    ordered.splice(insertAt, 0, feed);
+    const orderedIds = ordered.map((f) => f.id);
+
+    const sameGroup = feed.folderId === folderId;
+    if (sameGroup) {
+      const current = allFeeds
+        .filter((f) => f.folderId === folderId)
+        .map((f) => f.id);
+      // Dropped back into its own slot — nothing to persist.
+      if (orderedIds.join(",") === current.join(",")) return;
+    }
+
+    const folderName =
+      folderId == null
+        ? t("sidebar.uncategorized")
+        : allFolders.find((f) => f.id === folderId)?.name ?? "";
+    persistFeedOrder(
+      applyGroupOrder(
+        allFeeds.map((f) => (f.id === feed.id ? { ...f, folderId } : f)),
+        folderId,
+        orderedIds,
+      ),
+      sameGroup
+        ? api.reorderFeeds(orderedIds)
+        : api.moveFeedOrdered(feed.id, folderId, orderedIds),
+      sameGroup
+        ? undefined
+        : t("sidebar.toastMoved", { feed: feed.title, folder: folderName }),
+    );
+  };
+
+  // Keyboard-reachable counterpart to the drag, which no keyboard can drive.
+  const shiftFeed = (feed: Feed, dir: -1 | 1) => {
+    const group = allFeeds.filter((f) => f.folderId === feed.folderId);
+    const i = group.findIndex((f) => f.id === feed.id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= group.length) return;
+    const next = [...group];
+    [next[i], next[j]] = [next[j], next[i]];
+    const ids = next.map((f) => f.id);
+    persistFeedOrder(
+      applyGroupOrder(allFeeds, feed.folderId, ids),
+      api.reorderFeeds(ids),
+    );
+  };
+
+  // ── drag to reorder folders ──
+  const persistFolderOrder = (next: Folder[]) => {
+    qc.setQueryData(["folders"], next);
+    api
+      .reorderFolders(next.map((fo) => fo.id))
+      .catch((e) => reportError(e))
+      .finally(() => qc.invalidateQueries({ queryKey: ["folders"] }));
+  };
+
+  const shiftFolder = (folder: Folder, dir: -1 | 1) => {
+    const i = allFolders.findIndex((fo) => fo.id === folder.id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= allFolders.length) return;
+    const next = [...allFolders];
+    [next[i], next[j]] = [next[j], next[i]];
+    persistFolderOrder(next);
+  };
+
+  // `below` places the dragged folder after the hovered one, so the last slot
+  // stays reachable (a drop-above-only rule can never move a row to the end).
+  const dropFolderAt = (targetId: number, below: boolean) => {
+    const from = allFolders.findIndex((fo) => fo.id === folderDragId);
+    let to = allFolders.findIndex((fo) => fo.id === targetId);
+    setFolderDragId(null);
+    setFolderDrop(null);
+    if (from < 0 || to < 0) return;
+    const next = [...allFolders];
+    const [moved] = next.splice(from, 1);
+    // Removing the dragged folder shifts every later index down by one.
+    if (from < to) to -= 1;
+    next.splice(below ? to + 1 : to, 0, moved);
+    if (next.map((fo) => fo.id).join(",") === allFolders.map((fo) => fo.id).join(","))
+      return;
+    persistFolderOrder(next);
   };
 
   // ── feed / folder context menus ──
@@ -279,7 +427,25 @@ export default function Sidebar({
         onClick: () =>
           guard(api.moveFeed(f.id, null), t("sidebar.toastMovedOut")),
       });
+    // Menu counterpart to the drag-reorder, which no keyboard can reach.
+    const group = allFeeds.filter((x) => x.folderId === f.folderId);
+    const idx = group.findIndex((x) => x.id === f.id);
+    const nudge: MenuEntry[] = [];
+    if (idx > 0)
+      nudge.push({
+        icon: "arrow-up",
+        label: t("sidebar.moveFeedUp"),
+        onClick: () => shiftFeed(f, -1),
+      });
+    if (idx >= 0 && idx < group.length - 1)
+      nudge.push({
+        icon: "arrow-down",
+        label: t("sidebar.moveFeedDown"),
+        onClick: () => shiftFeed(f, 1),
+      });
     return [
+      ...nudge,
+      ...(nudge.length ? [{ separator: true } as MenuEntry] : []),
       {
         icon: "check-all",
         label: t("sidebar.markAllRead"),
@@ -324,16 +490,34 @@ export default function Sidebar({
     ];
   };
 
-  const folderMenu = (folder: Folder): MenuEntry[] => [
-    {
-      icon: "check-all",
-      label: t("sidebar.markAllRead"),
-      onClick: () =>
-        guard(
-          api.markAllRead({ kind: "folder", value: folder.id }),
-          t("sidebar.toastMarkedAllRead"),
-        ),
-    },
+  const folderMenu = (folder: Folder): MenuEntry[] => {
+    // Menu counterpart to the drag-reorder (see `shiftFeed`).
+    const idx = allFolders.findIndex((fo) => fo.id === folder.id);
+    const nudge: MenuEntry[] = [];
+    if (idx > 0)
+      nudge.push({
+        icon: "arrow-up",
+        label: t("sidebar.moveFolderUp"),
+        onClick: () => shiftFolder(folder, -1),
+      });
+    if (idx >= 0 && idx < allFolders.length - 1)
+      nudge.push({
+        icon: "arrow-down",
+        label: t("sidebar.moveFolderDown"),
+        onClick: () => shiftFolder(folder, 1),
+      });
+    return [
+      ...nudge,
+      ...(nudge.length ? [{ separator: true } as MenuEntry] : []),
+      {
+        icon: "check-all",
+        label: t("sidebar.markAllRead"),
+        onClick: () =>
+          guard(
+            api.markAllRead({ kind: "folder", value: folder.id }),
+            t("sidebar.toastMarkedAllRead"),
+          ),
+      },
     {
       icon: "refresh",
       label: t("sidebar.refreshFolder"),
@@ -366,6 +550,7 @@ export default function Sidebar({
         ),
     },
   ];
+  };
 
   const tagMenu = (tag: Tag): MenuEntry[] => {
     const idx = allTags.findIndex((tg) => tg.id === tag.id);
@@ -497,13 +682,23 @@ export default function Sidebar({
   };
 
   // ── feed row ──
-  const feedRow = (f: Feed) => (
+  const feedRow = (f: Feed, lastInGroup: boolean) => (
     <div
       key={f.id}
       ref={isActive({ kind: "feed", value: f.id }) ? activeFeedRef : undefined}
       className={`sb-item ${
         isActive({ kind: "feed", value: f.id }) ? "active" : ""
-      } ${dragId === f.id ? "dragging" : ""}`}
+      } ${dragId === f.id ? "dragging" : ""} ${
+        dropAt?.folderId === f.folderId && dropAt.beforeId === f.id
+          ? "drop-above"
+          : ""
+      } ${
+        dropAt?.folderId === f.folderId &&
+        dropAt.beforeId === null &&
+        lastInGroup
+          ? "drop-below"
+          : ""
+      }`}
       role="button"
       tabIndex={0}
       aria-current={isActive({ kind: "feed", value: f.id }) || undefined}
@@ -512,6 +707,38 @@ export default function Sidebar({
       onDragEnd={() => {
         setDragId(null);
         setDropFolder(null);
+        setDropAt(null);
+      }}
+      onDragOver={(e) => {
+        // Ignore this row while it is the dragged one, and whenever a *folder*
+        // is being dragged (that gesture sorts folders, not feeds).
+        if (dragId == null || dragId === f.id) return;
+        e.preventDefault();
+        // Claim the event, so the enclosing group container doesn't also read
+        // the pointer as "over the group, not over a row" (append to the end).
+        e.stopPropagation();
+        const box = e.currentTarget.getBoundingClientRect();
+        const below = e.clientY > box.top + box.height / 2;
+        // The point *after* this row is the next row of the same group — and
+        // `null` once there is none, meaning "end of the group". The dragged
+        // feed is excluded so the index matches the post-move list.
+        const group = allFeeds.filter(
+          (x) => x.folderId === f.folderId && x.id !== dragId,
+        );
+        const i = group.findIndex((x) => x.id === f.id);
+        setDropAt({
+          folderId: f.folderId,
+          beforeId: below ? group[i + 1]?.id ?? null : f.id,
+        });
+        setDropFolder(null);
+      }}
+      onDrop={(e) => {
+        if (dragId == null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const beforeId =
+          dropAt && dropAt.folderId === f.folderId ? dropAt.beforeId : null;
+        dropFeed(f.folderId, beforeId);
       }}
       onClick={() => select({ kind: "feed", value: f.id }, f.title)}
       onKeyDown={onActivate(() => select({ kind: "feed", value: f.id }, f.title))}
@@ -656,9 +883,12 @@ export default function Sidebar({
               if (dragId != null) {
                 e.preventDefault();
                 setDropFolder("none");
+                // The pointer is over the group, not over a row: fall back to
+                // "append to the end" and clear any row-level indicator.
+                setDropAt(null);
               }
             }}
-            onDrop={() => handleDrop(null)}
+            onDrop={() => dropFeed(null, null)}
             style={
               dropFolder === "none"
                 ? { outline: "2px solid var(--accent)", borderRadius: 8 }
@@ -666,7 +896,7 @@ export default function Sidebar({
             }
           >
             {ungrouped.length > 0 ? (
-              ungrouped.map(feedRow)
+              ungrouped.map((f, i) => feedRow(f, i === ungrouped.length - 1))
             ) : (
               <div className="sb-drop-hint">{t("sidebar.dropUngroup")}</div>
             )}
@@ -676,8 +906,15 @@ export default function Sidebar({
         {allFolders.map((folder) => {
           const inFolder = visibleFeeds.filter((f) => f.folderId === folder.id);
           // In "unread only" mode an empty folder is hidden — unless a drag is
-          // active, when it must stay as a drop target.
-          if (unreadOnly && dragId == null && inFolder.length === 0)
+          // active, when it must stay as a drop target. That covers a folder
+          // *reorder* too: during one, the dragged folder must stay on screen
+          // and its siblings must stay reachable, empty or not.
+          if (
+            unreadOnly &&
+            dragId == null &&
+            inFolder.length === 0 &&
+            folder.id !== folderDragId
+          )
             return null;
           const isCollapsed = collapsed[folder.id];
           const folderActive = isActive({ kind: "folder", value: folder.id });
@@ -693,9 +930,11 @@ export default function Sidebar({
                 if (dragId != null) {
                   e.preventDefault();
                   setDropFolder(folder.id);
+                  // Over the group, not over one of its rows: append to end.
+                  setDropAt(null);
                 }
               }}
-              onDrop={() => handleDrop(folder.id)}
+              onDrop={() => dropFeed(folder.id, null)}
               style={
                 dropFolder === folder.id
                   ? { outline: "2px solid var(--accent)", borderRadius: 8 }
@@ -705,10 +944,44 @@ export default function Sidebar({
               <div
                 className={`sb-folder ${isCollapsed ? "collapsed" : ""} ${
                   folderActive ? "active" : ""
+                } ${folderDragId === folder.id ? "dragging" : ""} ${
+                  folderDrop?.id === folder.id
+                    ? folderDrop.below
+                      ? "drop-below"
+                      : "drop-above"
+                    : ""
                 }`}
                 role="button"
                 tabIndex={0}
                 aria-current={folderActive || undefined}
+                draggable
+                onDragStart={() => setFolderDragId(folder.id)}
+                onDragEnd={() => {
+                  setFolderDragId(null);
+                  setFolderDrop(null);
+                }}
+                onDragOver={(e) => {
+                  // Only a folder drag sorts folders. A *feed* drag passing
+                  // over this header is left to the enclosing container, which
+                  // reads it as "drop the feed into this folder".
+                  if (folderDragId == null || folderDragId === folder.id) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const box = e.currentTarget.getBoundingClientRect();
+                  setFolderDrop({
+                    id: folder.id,
+                    below: e.clientY > box.top + box.height / 2,
+                  });
+                }}
+                onDrop={(e) => {
+                  if (folderDragId == null) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  dropFolderAt(
+                    folder.id,
+                    folderDrop?.id === folder.id ? folderDrop.below : false,
+                  );
+                }}
                 onClick={() => select({ kind: "folder", value: folder.id }, folder.name)}
                 onKeyDown={onActivate(() =>
                   select({ kind: "folder", value: folder.id }, folder.name),
@@ -739,7 +1012,8 @@ export default function Sidebar({
                   <span className="sb-count">{folderUnread}</span>
                 )}
               </div>
-              {!isCollapsed && inFolder.map(feedRow)}
+              {!isCollapsed &&
+                inFolder.map((f, i) => feedRow(f, i === inFolder.length - 1))}
             </div>
           );
         })}

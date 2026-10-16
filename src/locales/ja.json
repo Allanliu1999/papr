@@ -571,6 +571,10 @@
     "deleteTag": "タグを削除",
     "moveTagUp": "上へ移動",
     "moveTagDown": "下へ移動",
+    "moveFeedUp": "上へ移動",
+    "moveFeedDown": "下へ移動",
+    "moveFolderUp": "上へ移動",
+    "moveFolderDown": "下へ移動",
     "tagsEmptyHint": "記事を読みながらタグを付けると、ここにまとまります。",
     "toastTagCreated": "タグを作成しました",
     "toastTagDeleted": "タグを削除しました"

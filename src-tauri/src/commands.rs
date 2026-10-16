@@ -281,6 +281,37 @@ pub async fn move_feed(
     db::move_feed(&conn, id, folder_id)
 }
 
+/// Persist a reordered feed list (ids in the new display order, within one
+/// folder or the ungrouped group). Backs a sidebar drag that only changes the
+/// order, not the folder.
+#[tauri::command]
+pub async fn reorder_feeds(state: State<'_, AppState>, ids: Vec<i64>) -> AppResult<()> {
+    let conn = state.db.lock().await;
+    db::reorder_feeds(&conn, &ids)
+}
+
+/// Drop a dragged feed into `folder_id` at a specific place: `ordered_ids` is
+/// the destination group's full display order including the moved feed. One
+/// command (and one transaction) so the folder change and the new position can
+/// never be applied separately.
+#[tauri::command]
+pub async fn move_feed_ordered(
+    state: State<'_, AppState>,
+    id: i64,
+    folder_id: Option<i64>,
+    ordered_ids: Vec<i64>,
+) -> AppResult<()> {
+    let conn = state.db.lock().await;
+    db::move_feed_ordered(&conn, id, folder_id, &ordered_ids)
+}
+
+/// Persist a reordered folder list (ids in the new display order).
+#[tauri::command]
+pub async fn reorder_folders(state: State<'_, AppState>, ids: Vec<i64>) -> AppResult<()> {
+    let conn = state.db.lock().await;
+    db::reorder_folders(&conn, &ids)
+}
+
 /// Set a feed's per-feed refresh interval. `None` reverts it to the global
 /// interval; `Some(525600)` (the "off" sentinel) opts the feed out of
 /// automatic refresh. The change is honoured on the scheduler's next tick.

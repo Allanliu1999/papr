@@ -571,6 +571,10 @@
     "deleteTag": "Delete tag",
     "moveTagUp": "Move up",
     "moveTagDown": "Move down",
+    "moveFeedUp": "Move up",
+    "moveFeedDown": "Move down",
+    "moveFolderUp": "Move up",
+    "moveFolderDown": "Move down",
     "tagsEmptyHint": "Tag articles while reading to group them here.",
     "toastTagCreated": "Tag created",
     "toastTagDeleted": "Tag deleted"

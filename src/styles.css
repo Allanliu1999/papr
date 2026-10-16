@@ -678,7 +678,11 @@ button { font-family: inherit; }
   border-radius: 8px;
   pointer-events: none;
 }
-.sb-item.drop-above::after {
+/* The insertion line for a sidebar drag-sort. `drop-above` marks the point
+   *before* a row; `drop-below` marks the point after it — the latter is what
+   makes the last slot of a group reachable, since no row follows it. */
+.sb-item.drop-above::after,
+.sb-folder.drop-above::after {
   content: '';
   position: absolute;
   left: 8px; right: 8px;
@@ -687,6 +691,15 @@ button { font-family: inherit; }
   border-radius: 1px;
   top: -2px;
 }
+.sb-item.drop-below::after,
+.sb-folder.drop-below::after {
+  top: auto;
+  bottom: -2px;
+}
+/* Folder headers carry a drag-sort line too, and need a positioned box for
+   that absolutely-placed indicator. */
+.sb-folder { position: relative; }
+.sb-folder.dragging { opacity: 0.4; }
 
 /* ====== Article list ====== */
 .list {

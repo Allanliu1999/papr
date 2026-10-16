@@ -460,6 +460,22 @@ pub fn delete_folder(conn: &Connection, id: i64) -> AppResult<()> {
     Ok(())
 }
 
+/// Persist a new folder ordering — `ids` listed in the desired display order.
+/// Mirrors `reorder_tags`: the per-row updates run in one transaction so a
+/// mid-loop failure can't leave the sidebar half-reordered. `list_folders`
+/// already sorts by `position, name`, so a reorder needs no query change.
+pub fn reorder_folders(conn: &Connection, ids: &[i64]) -> AppResult<()> {
+    let tx = conn.unchecked_transaction()?;
+    for (pos, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE folders SET position = ?2 WHERE id = ?1",
+            params![id, pos as i64],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 // ─────────────────────────── feeds ───────────────────────────
 
 pub fn find_feed_by_url(conn: &Connection, url: &str) -> AppResult<Option<i64>> {
@@ -480,8 +496,10 @@ pub fn insert_feed(
     folder_id: Option<i64>,
 ) -> AppResult<i64> {
     conn.execute(
-        "INSERT INTO feeds(feed_url, site_url, title, description, source_type, folder_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO feeds(feed_url, site_url, title, description, source_type, folder_id, position)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6,
+                 (SELECT COALESCE(MAX(position), -1) + 1 FROM feeds
+                  WHERE folder_id IS ?6))",
         params![feed_url, site_url, title, description, source_type.as_str(), folder_id],
     )?;
     Ok(conn.last_insert_rowid())
@@ -523,7 +541,7 @@ pub fn list_feeds(conn: &Connection) -> AppResult<Vec<Feed>> {
                 f.folder_id, f.source_type, f.last_fetched_at, f.fetch_error,
                 (SELECT COUNT(*) FROM articles a WHERE a.feed_id = f.id AND a.is_read = 0),
                 f.refresh_interval_min, f.auto_translate, f.open_mode
-         FROM feeds f ORDER BY f.title COLLATE NOCASE",
+         FROM feeds f ORDER BY f.position, f.title COLLATE NOCASE, f.id",
     )?;
     let rows = stmt
         .query_map([], |r| {
@@ -830,6 +848,54 @@ pub fn rename_feed(conn: &Connection, id: i64, title: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Persist a new feed ordering *within one group* — `ids` listed in the
+/// desired display order. Mirrors `reorder_tags`: the per-row updates run in
+/// one transaction so a mid-loop failure can't leave the sidebar half-sorted.
+///
+/// `position` is only ever compared inside a folder (the frontend groups feeds
+/// by `folderId` and keeps the query's order within each group), so two
+/// folders holding overlapping position ranges is expected and harmless.
+pub fn reorder_feeds(conn: &Connection, ids: &[i64]) -> AppResult<()> {
+    let tx = conn.unchecked_transaction()?;
+    for (pos, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE feeds SET position = ?2 WHERE id = ?1",
+            params![id, pos as i64],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Move a feed into `folder_id` *and* pin its place in that group, atomically.
+///
+/// A sidebar drag needs both halves at once: `move_feed` alone keeps the feed's
+/// old `position`, which is meaningless in the destination and would drop the
+/// feed wherever that stale value happens to sort. `ordered_ids` is the
+/// destination group's full display order *including* the moved feed, exactly
+/// as the drop target computed it. The source group needs no rewrite — its
+/// remaining rows keep their relative order with a position gap.
+pub fn move_feed_ordered(
+    conn: &Connection,
+    id: i64,
+    folder_id: Option<i64>,
+    ordered_ids: &[i64],
+) -> AppResult<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "UPDATE feeds SET folder_id = ?2 WHERE id = ?1",
+        params![id, folder_id],
+    )?;
+    for (pos, feed_id) in ordered_ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE feeds SET position = ?2 WHERE id = ?1",
+            params![feed_id, pos as i64],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 // ─────────────────────────── newsletter sources ───────────────────────────
 
 /// One configured email-newsletter source: the backing feed plus its IMAP
@@ -854,7 +920,10 @@ pub fn insert_newsletter_source(
 ) -> AppResult<i64> {
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "INSERT INTO feeds(feed_url, title, source_type) VALUES (?1, ?2, 'newsletter')",
+        "INSERT INTO feeds(feed_url, title, source_type, position)
+         VALUES (?1, ?2, 'newsletter',
+                 (SELECT COALESCE(MAX(position), -1) + 1 FROM feeds
+                  WHERE folder_id IS NULL))",
         params![feed_url, title],
     )?;
     let feed_id = tx.last_insert_rowid();
@@ -2617,6 +2686,98 @@ mod tests {
             .query_row("SELECT id FROM articles", [], |r| r.get(0))
             .unwrap();
         (conn, article_id)
+    }
+
+    /// `list_feeds` follows `position` inside a group, falling back to title
+    /// order for the rows that share the default position 0 — which is what
+    /// makes a manual order purely additive for existing installs.
+    #[test]
+    fn feeds_follow_manual_position_within_their_group() {
+        let (conn, _) = test_db();
+        let folder = create_folder(&conn, "Tech").unwrap();
+        let bravo = insert_feed(
+            &conn, "https://b.example/rss", None, "Bravo", None, SourceType::Rss, Some(folder),
+        )
+        .unwrap();
+        let alpha = insert_feed(
+            &conn, "https://a.example/rss", None, "Alpha", None, SourceType::Rss, Some(folder),
+        )
+        .unwrap();
+
+        let order = |conn: &Connection| -> Vec<i64> {
+            list_feeds(conn)
+                .unwrap()
+                .into_iter()
+                .filter(|f| f.folder_id == Some(folder))
+                .map(|f| f.id)
+                .collect()
+        };
+
+        // A new feed is appended to its group, so the insertion order (not the
+        // title order, which would put "Alpha" first) is what shows until the
+        // user drags a manual order into place.
+        assert_eq!(order(&conn), vec![bravo, alpha]);
+
+        reorder_feeds(&conn, &[alpha, bravo]).unwrap();
+        assert_eq!(order(&conn), vec![alpha, bravo]);
+    }
+
+    /// A cross-folder drag moves the feed *and* pins its position in one step.
+    /// A bare `move_feed` would carry the feed's stale position into the
+    /// destination group, dropping it at an unrelated slot.
+    #[test]
+    fn move_feed_ordered_moves_and_pins_position() {
+        let (conn, _) = test_db();
+        let folder = create_folder(&conn, "Tech").unwrap();
+        let moved = insert_feed(
+            &conn, "https://m.example/rss", None, "Moved", None, SourceType::Rss, None,
+        )
+        .unwrap();
+        let kept = insert_feed(
+            &conn, "https://k.example/rss", None, "Kept", None, SourceType::Rss, Some(folder),
+        )
+        .unwrap();
+
+        // Drop `moved` above `kept`: the destination order becomes [moved, kept].
+        move_feed_ordered(&conn, moved, Some(folder), &[moved, kept]).unwrap();
+
+        let row = |id: i64| -> (Option<i64>, i64) {
+            conn.query_row(
+                "SELECT folder_id, position FROM feeds WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(row(moved), (Some(folder), 0));
+        assert_eq!(row(kept), (Some(folder), 1));
+
+        // …and the list query reports the same order.
+        let order: Vec<i64> = list_feeds(&conn)
+            .unwrap()
+            .into_iter()
+            .filter(|f| f.folder_id == Some(folder))
+            .map(|f| f.id)
+            .collect();
+        assert_eq!(order, vec![moved, kept]);
+    }
+
+    /// `reorder_folders` rewrites `position`, which `list_folders` already
+    /// sorts on ahead of the name — so the sidebar order follows the drag.
+    #[test]
+    fn reorder_folders_persists_the_display_order() {
+        let (conn, _) = test_db();
+        let second = create_folder(&conn, "Beta").unwrap();
+        let first = create_folder(&conn, "Alpha").unwrap();
+
+        let order = |conn: &Connection| -> Vec<i64> {
+            list_folders(conn).unwrap().into_iter().map(|f| f.id).collect()
+        };
+        // `create_folder` appends, so creation order wins over the name.
+        assert_eq!(order(&conn), vec![second, first]);
+
+        reorder_folders(&conn, &[first, second]).unwrap();
+        assert_eq!(order(&conn), vec![first, second]);
     }
 
     #[test]

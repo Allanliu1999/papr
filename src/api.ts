@@ -65,6 +65,21 @@ export const searchFeedDirectory = (query: string, lang: string) =>
 export const deleteFeed = (id: number) => invoke<void>("delete_feed", { id });
 export const moveFeed = (id: number, folderId: number | null) =>
   invoke<void>("move_feed", { id, folderId });
+/** Persist a new feed order *within one group* (ids in display order). Backs a
+ *  sidebar drag that reorders feeds without changing their folder. */
+export const reorderFeeds = (ids: number[]) =>
+  invoke<void>("reorder_feeds", { ids });
+/** Drop a dragged feed into `folderId` at a specific place. `orderedIds` is the
+ *  destination group's full display order *including* the moved feed, so the
+ *  folder change and the new position land in one transaction. */
+export const moveFeedOrdered = (
+  id: number,
+  folderId: number | null,
+  orderedIds: number[],
+) => invoke<void>("move_feed_ordered", { id, folderId, orderedIds });
+/** Persist a new folder order (ids in display order). */
+export const reorderFolders = (ids: number[]) =>
+  invoke<void>("reorder_folders", { ids });
 export const renameFeed = (id: number, title: string) =>
   invoke<void>("rename_feed", { id, title });
 /** Set a feed's refresh interval (minutes). `null` follows the global
