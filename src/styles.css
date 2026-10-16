@@ -52,11 +52,6 @@
   /* density */
   --row-py: 14px;
   --list-px: 18px;
-  /* Side of the list-row thumbnail — a plain fixed square, the way Fluent
-     Reader sizes its list cards. The per-density values live on
-     `[data-density=…]` below; this copy is the fallback, so the image still
-     gets a real size if `data-density` is ever absent from the root. */
-  --art-thumb-size: 82px;
 
   /* type — bundled variable woff2 first (see main.tsx), then platform
      fallbacks so a missing/blocked font doesn't drop to a system serif. */
@@ -297,13 +292,9 @@
   background: var(--accent);
 }
 
-/* Density profiles. `--art-thumb-size` is the side of the list-row thumbnail:
-   each value is that density's row height minus the 8px the image keeps above
-   and below it, so a row with a thumbnail ends up exactly as tall as one
-   without and the virtualizer's estimates need no adjustment. */
-[data-density="compact"] { --row-py: 10px; --list-px: 14px; --art-thumb-size: 62px; }
-[data-density="cozy"]    { --row-py: 14px; --list-px: 18px; --art-thumb-size: 82px; }
-[data-density="spacious"]{ --row-py: 20px; --list-px: 24px; --art-thumb-size: 106px; }
+[data-density="compact"] { --row-py: 10px; --list-px: 14px; --art-thumb-h: 40px; }
+[data-density="cozy"]    { --row-py: 14px; --list-px: 18px; --art-thumb-h: 52px; }
+[data-density="spacious"]{ --row-py: 20px; --list-px: 24px; --art-thumb-h: 66px; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -814,57 +805,27 @@ button { font-family: inherit; }
   position: relative;
   transition: background .12s;
 }
-/* A list row whose article has a body image: a fixed-size cover on the left and
-   the text beside it.
- *
- *  This mirrors Fluent Reader's list card (`div.head` + `div.data`): the image
- *  box has a fixed size, `object-fit: cover` fills it, and the spacing comes
- *  from plain margins on the two children. Nothing here derives a dimension
- *  from the row, from the text, or from the image's own pixel size — which is
- *  what makes it immune to the failures that a "match the text height" rule ran
- *  into: the image can neither blow the row open nor end up with no size at all.
- *
- *  Driven by the `has-thumb` class the list component puts on the row, rather
- *  than by `:has(> .art-list-thumb)`: the whole row layout hangs off this one
- *  condition, so it uses the most basic selector available. */
-.art.has-thumb {
+/* A row whose article has a body image: the thumbnail comes first and the text
+   sits beside it. Keyed on the element actually being rendered, so a row
+   without an image (or whose image failed to load) keeps the full width rather
+   than showing an empty gap. */
+.art:has(> .art-side-thumb) {
   display: flex;
-  /* The image and text are both inset by their own margins, so the row needs no
-     padding of its own — the default `--row-py`/`--list-px` would double up. */
-  padding: 0;
+  align-items: flex-start;
+  gap: 10px;
 }
-/* The image box. `.head` in Fluent Reader; same fixed square, same margins.
- *
- *  Named `art-list-thumb`, not `art-thumb`: the card view already owns
- *  `.art.card .art-thumb` for its 16:9 banner, and a plain `.art-thumb` rule
- *  here would leak a height and three margins into it. */
-.art-list-thumb {
-  flex: none;
-  width: var(--art-thumb-size, 82px);
-  height: var(--art-thumb-size, 82px);
-  margin: 8px 0 8px var(--list-px, 18px);
-  overflow: hidden;
+.art-body { flex: 1; min-width: 0; }
+/* Fitted, never cropped: a wide banner keeps its whole width and simply ends up
+   short. The height follows the density, so the thumbnail never makes a row
+   taller than the list's row estimate expects. */
+.art-side-thumb {
+  height: var(--art-thumb-h, 52px);
+  width: auto;
+  max-width: 40%;
+  flex-shrink: 0;
+  object-fit: contain;
   border-radius: 6px;
   background: var(--accent-soft);
-}
-/* `object-fit: cover` scales the image to fill the square and crops whatever
-   does not fit, so the box size is always exact. `-webkit-user-drag: none` and
-   `display: block` match Fluent Reader and keep the border-radius clean. */
-.art-list-thumb img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  -webkit-user-drag: none;
-}
-/* The text column. `.data` in Fluent Reader. `overflow: hidden` keeps a long
-   word from widening the row, and `min-width: 0` is what lets a flex child
-   shrink below its content width in the first place. */
-.art-body {
-  flex: 1;
-  min-width: 0;
-  margin: 8px var(--list-px, 18px) 8px 10px;
-  overflow: hidden;
 }
 .art:hover { background: var(--hover); }
 .art.active { background: var(--accent-soft); }

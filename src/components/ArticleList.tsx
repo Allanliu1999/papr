@@ -113,28 +113,11 @@ export default function ArticleList({ onToast }: Props) {
   // title-only mode drops the `.art-snippet` block, so its estimate loses
   // roughly a line and a half of preview text per row. (These were already
   // estimates rather than measurements — see `estimateSize` below.)
-  //
-  // The list thumbnail does not change the row height: it is a fixed square
-  // whose size is already row height − 16px, the 16px going to its 8px margins
-  // (see `--art-thumb-size` in styles.css). So the estimates below hold whether
-  // or not images are shown.
   const rowEstimate = (() => {
     if (viewMode === "card") return listTitleOnly ? 285 : 320;
     const base = density === "compact" ? 78 : density === "spacious" ? 122 : 98;
-    // Title-only rows never show a thumbnail (see the render below), so this
-    // only applies to the normal list.
-    if (listTitleOnly) return base - 30;
-    return base;
+    return listTitleOnly ? base - 30 : base;
   })();
-  // Whether list rows show a thumbnail at all.
-  //
-  // This drives the `has-thumb` class on the row, which is what puts the image
-  // and the text side by side. It is deliberately a class rather than a `:has()`
-  // selector in styles.css: the layout of the whole row hangs off this one
-  // condition, and a selector that silently stops matching would drop the image
-  // back into normal flow, where it would push the text out of sight.
-  const withListThumb =
-    viewMode === "list" && showListThumbs && !listTitleOnly;
   const virt = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
@@ -638,7 +621,7 @@ export default function ArticleList({ onToast }: Props) {
                       selectedId === a.id ? "active" : ""
                     } ${a.isRead ? "read" : ""} ${
                       listTitleOnly ? "title-only" : ""
-                    } ${withListThumb && a.imageUrl ? "has-thumb" : ""}`}
+                    }`}
                     role="option"
                     id={`option-article-${a.id}`}
                     aria-selected={selectedId === a.id}
@@ -653,34 +636,13 @@ export default function ArticleList({ onToast }: Props) {
                     {viewMode === "card" && showCardThumbs && (
                       <CardThumb article={a} />
                     )}
-                    {/* List view: the article's first body image, in a fixed
-                        square before the text — the same shape Fluent Reader
-                        gives its list cards (a `head` box beside a `data`
-                        column). The square is sized by `--art-thumb-size` and
-                        `object-fit: cover` fills it exactly, so the image can
-                        neither stretch the row nor shrink to nothing.
-
-                        A row without an image renders nothing here and keeps
-                        its full width.
-
-                        Skipped in title-only mode: those rows have far less
-                        text, so a full-size image would tower over it (and the
-                        row estimate there assumes no thumbnail). */}
-                    {withListThumb && a.imageUrl && (
-                      <div className="art-list-thumb">
-                        <img
-                          src={a.imageUrl}
-                          alt=""
-                          loading="lazy"
-                          draggable={false}
-                          onError={(e) => {
-                            // Fall back to a text-only row rather than leaving a
-                            // broken-image box behind. Hiding only the image
-                            // keeps the row's shape stable while it loads.
-                            e.currentTarget.style.display = "none";
-                          }}
-                        />
-                      </div>
+                    {/* List view: the article's first body image, sized to the
+                        row and scaled (never cropped), so the text beside it
+                        starts a little further in. Rows without an image render
+                        nothing here and keep the full width — see the
+                        `:has()` rule in styles.css. */}
+                    {viewMode === "list" && showListThumbs && (
+                      <ListThumb article={a} />
                     )}
                     <div className="art-body">
                     <div className="art-head">
@@ -787,6 +749,33 @@ function CardThumb({ article }: { article: ArticleSummary }) {
         }}
       />
     </div>
+  );
+}
+
+/** The article's first body image, shown beside a list row.
+ *
+ *  CSS sizes it to the row's own height and scales it with `object-fit:
+ *  contain`, so a wide image is fitted rather than cropped — unlike the card
+ *  thumbnail, where filling the frame reads better. Renders nothing when there
+ *  is no image or it fails to load; the row then keeps its full width, because
+ *  the indent is driven by this element's presence (`:has()` in styles.css). */
+function ListThumb({ article }: { article: ArticleSummary }) {
+  const [broken, setBroken] = useState(false);
+  // The virtualizer recycles this instance across rows — clear the error flag
+  // whenever the image URL changes.
+  useEffect(() => setBroken(false), [article.imageUrl]);
+
+  if (!article.imageUrl || broken) return null;
+
+  return (
+    <img
+      className="art-side-thumb"
+      src={article.imageUrl}
+      alt=""
+      loading="lazy"
+      draggable={false}
+      onError={() => setBroken(true)}
+    />
   );
 }
 
