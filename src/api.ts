@@ -404,6 +404,9 @@ export const configureAiProvider = (provider: string, model?: string, baseUrl?: 
 export interface DataLocation {
   dir: string;
   defaultDir: string;
+  /** What a portable install would use: a `data` folder beside the executable.
+   *  Shown as the suggested value so the relative form is discoverable. */
+  suggestedDir: string;
   custom: boolean;
   fellBack: boolean;
 }

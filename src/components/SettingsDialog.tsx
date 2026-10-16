@@ -1746,6 +1746,20 @@ function DangerZone({ onToast }: { onToast: (m: string) => void }) {
           {t("settings.advanced.dataLocationFellBack", { dir: dataLoc.dir })}
         </p>
       )}
+      {/* How to type a path — the relative form is what keeps a portable
+          install working when the drive letter changes. */}
+      <p
+        style={{
+          margin: "0 0 12px",
+          fontSize: 12,
+          color: "var(--muted)",
+          lineHeight: 1.55,
+        }}
+      >
+        {t("settings.advanced.dataLocationHint", {
+          dir: dataLoc?.suggestedDir ?? "data",
+        })}
+      </p>
       <Row
         label={t("settings.advanced.resetSettings")}
         desc={t("settings.advanced.resetSettingsDesc")}

@@ -1411,6 +1411,10 @@ pub async fn take_pending_deep_link(state: State<'_, AppState>) -> AppResult<Opt
 pub struct DataLocation {
     dir: String,
     default_dir: String,
+    /// What the portable option resolves to: a `data` folder beside the
+    /// executable. Offered as the placeholder in the settings prompt so the
+    /// relative form is discoverable; nothing uses it implicitly.
+    suggested_dir: String,
     /// A directory is pinned, even if it is currently unusable.
     custom: bool,
     /// A pin was set but unreachable, so `dir` is the default one.
@@ -1423,6 +1427,9 @@ pub async fn get_data_location(state: State<'_, AppState>) -> AppResult<DataLoca
     Ok(DataLocation {
         dir: resolved.dir.to_string_lossy().into_owned(),
         default_dir: state.default_data_dir.to_string_lossy().into_owned(),
+        suggested_dir: crate::location::portable_data_dir()
+            .to_string_lossy()
+            .into_owned(),
         custom: resolved.custom,
         fell_back: resolved.fell_back,
     })
@@ -1430,9 +1437,12 @@ pub async fn get_data_location(state: State<'_, AppState>) -> AppResult<DataLoca
 
 /// Inspect a candidate directory *before* anything is written: is it usable,
 /// and does it already hold a library the user might want to adopt?
+///
+/// The path is expanded exactly as `set_data_location` will expand it, so the
+/// answer describes where the data would really land.
 #[tauri::command]
 pub async fn probe_data_dir(path: String) -> crate::location::Probe {
-    crate::location::probe(std::path::Path::new(&path))
+    crate::location::probe(&crate::location::expand_input(&path))
 }
 
 /// What to do with a library already sitting at the target directory.
@@ -1464,7 +1474,9 @@ pub async fn set_data_location(
     if path.trim().is_empty() {
         return Err(AppError::code("dataDirEmpty"));
     }
-    let target = PathBuf::from(path.trim());
+    // A relative path anchors to the executable's directory, so `data` means
+    // "the data folder beside the app" wherever the app happens to live.
+    let target = crate::location::expand_input(&path);
     if target == state.data_dir() {
         return Err(AppError::code("dataDirUnchanged"));
     }
@@ -1499,7 +1511,14 @@ pub async fn set_data_location(
     if let Some(json) = prefs_json {
         crate::location::write_prefs(&target, &json).map_err(AppError::other)?;
     }
-    crate::location::write_pointer(&state.config_dir, Some(&target)).map_err(AppError::other)?;
+    // The pointer stores what the user typed, *not* the expanded path: keeping
+    // `data` relative is what lets the pin survive the drive letter changing
+    // when the same stick is opened on another machine.
+    crate::location::write_pointer(
+        &state.config_dir,
+        Some(std::path::Path::new(path.trim())),
+    )
+    .map_err(AppError::other)?;
     // Recorded immediately, so a preference change made before the relaunch
     // lands beside the database the user just chose.
     state.set_data_dir(target);

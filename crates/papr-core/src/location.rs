@@ -58,6 +58,41 @@ pub fn pointer_path(config_dir: &Path) -> PathBuf {
     config_dir.join(POINTER_FILE)
 }
 
+/// The directory the running executable lives in.
+///
+/// This — not the process's working directory — is the anchor for a relative
+/// data path. A GUI launch has no meaningful working directory (a shortcut
+/// typically starts it in `C:\Windows\System32`), so resolving `data` against
+/// it would scatter the library somewhere unpredictable.
+pub fn app_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Expand a path the user typed: an absolute one is used as-is, a relative one
+/// is taken relative to [`app_dir`].
+///
+/// Relative is what makes a portable install actually portable — `data` keeps
+/// working when the same USB stick is `E:` on one machine and `F:` on the next,
+/// where a stored absolute path would point at nothing.
+pub fn expand_input(input: &str) -> PathBuf {
+    let path = PathBuf::from(input.trim());
+    if path.is_absolute() {
+        path
+    } else {
+        app_dir().join(path)
+    }
+}
+
+/// The default *suggestion* for a portable install: `data` beside the
+/// executable. Offered as the placeholder in Settings so the relative form —
+/// and what it resolves to — is discoverable. Nothing uses it implicitly.
+pub fn portable_data_dir() -> PathBuf {
+    app_dir().join("data")
+}
+
 /// Resolve the data directory: the pinned one when it is usable, otherwise the
 /// default. Never fails — an unusable pin degrades to `fell_back`.
 pub fn resolve(config_dir: &Path, default_dir: &Path) -> Resolved {
@@ -80,7 +115,12 @@ pub fn resolve(config_dir: &Path, default_dir: &Path) -> Resolved {
     }
 }
 
-/// The pinned directory, if one is set. A blank value counts as unset.
+/// The pinned directory, if one is set, with a relative value expanded to where
+/// it actually lands ([`expand_input`]). A blank value counts as unset.
+///
+/// The expansion happens here rather than at write time so the pointer keeps
+/// the text the user typed — that is what lets a relative pin survive the
+/// drive letter changing between machines.
 pub fn read_pointer(config_dir: &Path) -> Option<PathBuf> {
     let raw = fs::read_to_string(pointer_path(config_dir)).ok()?;
     let parsed: Pointer = serde_json::from_str(&raw).ok()?;
@@ -88,7 +128,7 @@ pub fn read_pointer(config_dir: &Path) -> Option<PathBuf> {
     if dir.is_empty() {
         None
     } else {
-        Some(PathBuf::from(dir))
+        Some(expand_input(dir))
     }
 }
 
@@ -226,6 +266,33 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn relative_inputs_anchor_to_the_executable_dir() {
+        // An absolute path is taken as written…
+        let absolute = std::env::temp_dir().join("papr-absolute-probe");
+        assert_eq!(expand_input(absolute.to_string_lossy().as_ref()), absolute);
+        // …a relative one anchors to the executable's directory, trimmed.
+        assert_eq!(expand_input("  data  "), app_dir().join("data"));
+        assert_eq!(portable_data_dir(), app_dir().join("data"));
+    }
+
+    /// The pointer has to keep the text the user typed. Storing the expanded
+    /// absolute path instead would defeat the point of a portable install: the
+    /// pin would break the moment the drive letter changes between machines.
+    #[test]
+    fn a_relative_pin_is_stored_verbatim_and_expanded_on_read() {
+        let config = TempDir::new("cfg-relative");
+        write_pointer(config.path(), Some(Path::new("papr-rel-data"))).unwrap();
+
+        let raw = fs::read_to_string(pointer_path(config.path())).unwrap();
+        assert!(raw.contains("papr-rel-data"), "stored exactly as typed");
+
+        assert_eq!(
+            read_pointer(config.path()),
+            Some(app_dir().join("papr-rel-data"))
+        );
     }
 
     #[test]
