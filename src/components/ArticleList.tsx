@@ -113,10 +113,18 @@ export default function ArticleList({ onToast }: Props) {
   // title-only mode drops the `.art-snippet` block, so its estimate loses
   // roughly a line and a half of preview text per row. (These were already
   // estimates rather than measurements — see `estimateSize` below.)
+  //
+  // The list thumbnail is deliberately 8px taller than the row's text (see
+  // `--art-thumb-h` in styles.css), so with thumbnails on every list row grows
+  // by 8px and the estimate has to follow, or the scrollbar length and scroll
+  // position drift against the real content.
   const rowEstimate = (() => {
     if (viewMode === "card") return listTitleOnly ? 285 : 320;
     const base = density === "compact" ? 78 : density === "spacious" ? 122 : 98;
-    return listTitleOnly ? base - 30 : base;
+    // Title-only rows never show a thumbnail (see the render below), so this
+    // only applies to the normal list.
+    if (listTitleOnly) return base - 30;
+    return showListThumbs ? base + 8 : base;
   })();
   const virt = useVirtualizer({
     count: items.length,
@@ -636,29 +644,37 @@ export default function ArticleList({ onToast }: Props) {
                     {viewMode === "card" && showCardThumbs && (
                       <CardThumb article={a} />
                     )}
-                    {/* List view: the article's first body image. Absolutely
-                        positioned by `.art-side-thumb`, so it never affects the
-                        row's height or squeezes the text — it just sits in the
-                        strip the row reserves for it. A row without an image
-                        renders nothing here and keeps its full width.
+                    {/* List view: the article's first body image, in its own
+                        strip before the text — flex puts the text beside it,
+                        never under it. Sized by `.art-side-thumb` (text height
+                        + 8px; anything wider than 1.5:1 is cropped on the
+                        right). A row without an image renders nothing here and
+                        keeps its full width.
+
+                        Skipped in title-only mode: those rows have far less
+                        text, so the fixed thumbnail height would tower over it
+                        (and the row estimate there assumes no thumbnail).
 
                         `${a.imageUrl}` doubles as the key: when the virtualizer
                         recycles this row for a different article, the element is
                         rebuilt rather than keeping the previous image's hidden
                         state (see the onError handler). */}
-                    {viewMode === "list" && showListThumbs && a.imageUrl && (
-                      <img
-                        key={a.imageUrl}
-                        className="art-side-thumb"
-                        src={a.imageUrl}
-                        alt=""
-                        loading="lazy"
-                        draggable={false}
-                        onError={(e) => {
-                          e.currentTarget.style.display = "none";
-                        }}
-                      />
-                    )}
+                    {viewMode === "list" &&
+                      showListThumbs &&
+                      !listTitleOnly &&
+                      a.imageUrl && (
+                        <img
+                          key={a.imageUrl}
+                          className="art-side-thumb"
+                          src={a.imageUrl}
+                          alt=""
+                          loading="lazy"
+                          draggable={false}
+                          onError={(e) => {
+                            e.currentTarget.style.display = "none";
+                          }}
+                        />
+                      )}
                     <div className="art-head">
                       {!a.isRead && <span className="art-dot" />}
                       <span className="art-feed">{a.feedTitle}</span>

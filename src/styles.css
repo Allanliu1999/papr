@@ -292,9 +292,14 @@
   background: var(--accent);
 }
 
-[data-density="compact"] { --row-py: 10px; --list-px: 14px; }
-[data-density="cozy"]    { --row-py: 14px; --list-px: 18px; }
-[data-density="spacious"]{ --row-py: 20px; --list-px: 24px; }
+/* `--art-thumb-h` is the list thumbnail's height: the row's typical text block
+   (list height − 2×row-py) plus 8px. `-w` is that times 1.5, the width it is
+   allowed to occupy. Both are spelled out per density rather than derived, so
+   nothing depends on the image's own size or on a percentage resolving the way
+   we hope. */
+[data-density="compact"] { --row-py: 10px; --list-px: 14px; --art-thumb-h: 66px; --art-thumb-w: 99px; }
+[data-density="cozy"]    { --row-py: 14px; --list-px: 18px; --art-thumb-h: 78px; --art-thumb-w: 117px; }
+[data-density="spacious"]{ --row-py: 20px; --list-px: 24px; --art-thumb-h: 90px; --art-thumb-w: 135px; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -805,37 +810,38 @@ button { font-family: inherit; }
   position: relative;
   transition: background .12s;
 }
-/* A row whose article has a body image: the image occupies a reserved strip on
-   the left and the text is indented past it. Keyed on the element actually
-   being rendered, so a row without an image (or whose image failed to load)
-   keeps its full width instead of showing an empty gap. */
+/* A row whose article has a body image: the image sits in its own strip at the
+   start of the row and the text runs beside it — side by side, never on top of
+   each other. Keyed on the element actually being rendered, so a row without an
+   image (or whose image failed to load) keeps its full width instead of showing
+   an empty gap. */
 .art:has(> .art-side-thumb) {
-  /* Clips a too-wide image. It never clips vertically — the image's height comes
-     from its own top/bottom insets below, not from this box. */
-  overflow: hidden;
-  /* Room for the image, as a share of the row's own width. CSS has no way to
-     express "1.5 × the image's height" here, so this is deliberately an
-     approximation: a wide image fills the strip and gets clipped, a narrow one
-     leaves a little space to its right. */
-  padding-left: calc(var(--list-px) + 40%);
+  display: flex;
+  /* Top-aligned: the image is intentionally 8px taller than the text, so
+     centring it would push the first line of text down. */
+  align-items: flex-start;
+  gap: 10px;
 }
 /* The image itself.
  *
- *  Height: `top` and `bottom` inset it by `--row-py - 4px` on each side. Since
- *  row height − 2×row-py is exactly the height of the row's text block, that
- *  works out to text height + 8px — the cap, never exceeded. Being absolutely
- *  positioned, it also never makes the row taller.
+ *  Bleed: the row carries `--row-py` of vertical padding, which is the gap the
+ *  text sits inside. The image is not text and must not repeat that gap, so a
+ *  negative margin pulls it back out to the row's top and bottom edges, and the
+ *  height adds the two paddings back. Its visible height therefore equals the
+ *  whole row height, while the width stays the fixed cap — so its own pixel size
+ *  can neither blow the row open nor squeeze the text out of view.
  *
- *  Width: taken from the image's own proportions at that height. Anything wider
- *  than the reserved strip is clipped by the rule above; the height is never
- *  cropped. */
+ *  `object-fit: cover` fills that box; an image wider than the box loses only
+ *  its right-hand edge (`object-position: left center` keeps the left), while
+ *  the height is never cropped. A narrower image keeps its whole width and the
+ *  box's background shows beside it. */
 .art-side-thumb {
-  position: absolute;
-  left: var(--list-px);
-  top: calc(var(--row-py) - 4px);
-  bottom: calc(var(--row-py) - 4px);
-  height: auto;
-  width: auto;
+  flex: none;
+  margin-block: calc(-1 * var(--row-py));
+  width: var(--art-thumb-w);
+  height: calc(var(--art-thumb-h) + var(--row-py) * 2);
+  object-fit: cover;
+  object-position: left center;
   border-radius: 6px;
   background: var(--accent-soft);
 }
