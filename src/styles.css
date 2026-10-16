@@ -815,36 +815,43 @@ button { font-family: inherit; }
   gap: 10px;
 }
 .art-body { flex: 1; min-width: 0; }
-/* The thumbnail box: as tall as the row's own content (the title and snippet
-   decide that — the image never stretches the row), inset 3px top and bottom so
-   it doesn't sit flush against the row edges. Its width is capped at 150% of
-   that height by the 3:2 aspect ratio, which *is* the "at most 1.5× the height"
-   rule — CSS can't express a max-width measured in the element's own height, so
-   the cap is baked into the box instead. */
+/* The thumbnail box.
+ *
+ *  Height: it stretches to the row, then `margin-block` pulls it in by
+ *  `--row-py - 3px` on each side. Since row height − 2×row-py is exactly the
+ *  height of the text block, that leaves the image 3px taller than the text at
+ *  the top and 3px at the bottom — the text keeps its own `--row-py` padding,
+ *  and the image never makes the row taller.
+ *
+ *  Width: capped at 150% of that height, expressed as the 3:2 aspect ratio.
+ *  There is no `max-width` form for "1.5 × my own height", so the cap has to be
+ *  the ratio itself. It only works because the <img> below is absolutely
+ *  positioned: a laid-out image would hand the box its intrinsic width (a
+ *  1200px photo), which `min-width: 0` alone does not undo — `flex-basis: auto`
+ *  still resolves to that content width, and overrides the ratio.
+ *
+ *  A wider image overflows and is clipped by `overflow: hidden`; the height is
+ *  always shown in full, so nothing is ever cropped vertically. */
 .art-thumb-box {
+  position: relative;
   align-self: stretch;
-  margin-block: 3px;
+  margin-block: calc(var(--row-py) - 3px);
   aspect-ratio: 3 / 2;
   max-width: 100%;
-  /* The box is a flex item, whose default `min-width: auto` would size it to the
-     image's intrinsic width — a 1200px photo would blow the row open instead of
-     being capped at 150% of the height. Zeroing it lets the aspect ratio win,
-     and the overflow rule below do the clipping. */
   min-width: 0;
   flex-shrink: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  /* A wider image overflows the box and is clipped — only the width is ever
-     cropped; the height is always shown in full. */
   overflow: hidden;
   border-radius: 6px;
   background: var(--accent-soft);
 }
-/* Scaled to the box's height, preserving the image's own proportions. A narrow
-   image simply doesn't reach the right edge (the box colour shows through);
-   a wide one overflows and gets clipped by the rule above. */
+/* Taken out of flow so the box's width comes from the aspect ratio alone.
+   Scaled to the box's full height with its own proportions kept: a narrow image
+   simply doesn't reach the right edge (the box colour shows through), a wide one
+   overflows and is clipped by the rule above. */
 .art-thumb-box img {
+  position: absolute;
+  left: 0;
+  top: 0;
   height: 100%;
   width: auto;
   display: block;
