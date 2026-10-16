@@ -737,6 +737,15 @@ function ReadingSection() {
             onChange={(v) => setPref({ showReadingTime: v })}
           />
         </Row>
+        <Row
+          label={t("settings.reading.listTitleOnly")}
+          desc={t("settings.reading.listTitleOnlyDesc")}
+        >
+          <Toggle
+            checked={prefs.listTitleOnly}
+            onChange={(v) => setPref({ listTitleOnly: v })}
+          />
+        </Row>
       </div>
       <div className="settings-group">
         <h3 className="settings-group-title">{t("settings.reading.openModeTitle")}</h3>

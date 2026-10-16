@@ -42,6 +42,7 @@ export default function ArticleList({ onToast }: Props) {
   const viewMode = useUi((s) => s.viewMode);
   const density = useUi((s) => s.density);
   const showCardThumbs = useUi((s) => s.prefs.showCardThumbs);
+  const listTitleOnly = useUi((s) => s.prefs.listTitleOnly);
   const selectedId = useUi((s) => s.selectedArticleId);
   const openArticle = useUi((s) => s.openArticle);
 
@@ -107,14 +108,15 @@ export default function ArticleList({ onToast }: Props) {
   const baseOffset = (browse.data?.pageParams?.[0] as number | undefined) ?? listAnchor;
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const rowEstimate =
-    viewMode === "card"
-      ? 320
-      : density === "compact"
-        ? 78
-        : density === "spacious"
-          ? 122
-          : 98;
+  // Row-height estimates for the virtualizer, kept in step with the CSS. The
+  // title-only mode drops the `.art-snippet` block, so its estimate loses
+  // roughly a line and a half of preview text per row. (These were already
+  // estimates rather than measurements — see `estimateSize` below.)
+  const rowEstimate = (() => {
+    if (viewMode === "card") return listTitleOnly ? 285 : 320;
+    const base = density === "compact" ? 78 : density === "spacious" ? 122 : 98;
+    return listTitleOnly ? base - 30 : base;
+  })();
   const virt = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
@@ -616,7 +618,9 @@ export default function ArticleList({ onToast }: Props) {
                   <div
                     className={`art ${viewMode === "card" ? "card" : ""} ${
                       selectedId === a.id ? "active" : ""
-                    } ${a.isRead ? "read" : ""}`}
+                    } ${a.isRead ? "read" : ""} ${
+                      listTitleOnly ? "title-only" : ""
+                    }`}
                     role="option"
                     id={`option-article-${a.id}`}
                     aria-selected={selectedId === a.id}
@@ -674,7 +678,7 @@ export default function ArticleList({ onToast }: Props) {
                     <h3 className="art-title" title={rt.hasTranslation ? a.title : undefined}>
                       {rt.title}
                     </h3>
-                    {rt.snippet && (
+                    {!listTitleOnly && rt.snippet && (
                       <p
                         className="art-snippet"
                         title={rt.hasTranslation ? (a.snippet ?? undefined) : undefined}

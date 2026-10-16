@@ -880,6 +880,9 @@ button { font-family: inherit; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* Title-only rows (Settings → Reading → layout): with the preview gone, the
+   title's own bottom margin is just dead space above the row's padding. */
+.art.title-only .art-title { margin-bottom: 0; }
 
 /* card variant */
 .art.card {

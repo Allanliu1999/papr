@@ -316,6 +316,8 @@
       "maxWidth": "Body max width",
       "readingTime": "Show estimated reading time",
       "readingTimeDesc": "Show estimated reading time in the article info bar",
+      "listTitleOnly": "Title-only rows",
+      "listTitleOnlyDesc": "Show feed items as titles only, without the body preview",
       "openModeTitle": "Open mode",
       "defaultOpenMode": "Open articles as",
       "defaultOpenModeDesc": "How articles open by default — individual feeds can override this in Subscriptions"

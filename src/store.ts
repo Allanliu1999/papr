@@ -95,6 +95,9 @@ export interface Prefs {
   hideReadOnStartup: boolean;
   /** Sidebar "unread only" mode — hide feeds with no unread articles. */
   sidebarUnreadOnly: boolean;
+  /** List rows show the title only, with no body preview underneath. The
+   *  article list keeps its meta line (feed · time · flags) either way. */
+  listTitleOnly: boolean;
 }
 
 const ls = {
@@ -213,6 +216,7 @@ const PREF_KEYS: (keyof Prefs)[] = [
   "startupView",
   "hideReadOnStartup",
   "sidebarUnreadOnly",
+  "listTitleOnly",
 ];
 
 /** Mirror the active palette + mode into the backend settings table so the Rust
@@ -276,6 +280,9 @@ function loadPrefs(): Prefs {
     ),
     hideReadOnStartup: ls.bool("pref.hideReadOnStartup", false),
     sidebarUnreadOnly: ls.bool("pref.sidebarUnreadOnly", false),
+    // Off by default, so the list keeps showing each article's body preview and
+    // the switch only ever takes that away.
+    listTitleOnly: ls.bool("pref.listTitleOnly", false),
   };
 }
 

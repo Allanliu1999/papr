@@ -316,6 +316,8 @@
       "maxWidth": "正文最大宽度",
       "readingTime": "显示预计阅读时间",
       "readingTimeDesc": "在文章信息栏显示估算阅读时长",
+      "listTitleOnly": "列表仅显示标题",
+      "listTitleOnlyDesc": "订阅条目只显示标题，不显示正文摘要",
       "openModeTitle": "打开方式",
       "defaultOpenMode": "默认打开方式",
       "defaultOpenModeDesc": "文章默认的打开方式，可在订阅源列表中按源覆盖"
