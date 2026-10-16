@@ -3,6 +3,7 @@ import { cloneElement, isValidElement, useEffect, useRef, useState } from "react
 import { useTranslation } from "react-i18next";
 import { getVersion } from "@tauri-apps/api/app";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { relaunch } from "@tauri-apps/plugin-process";
 import * as api from "../api";
 import { useUi, READER_BOUNDS, type OpenMode } from "../store";
 import { useArticleActions } from "../hooks/articleActions";
@@ -15,10 +16,12 @@ import { checkForUpdates } from "../lib/updater";
 import { saveTextFile } from "../lib/save";
 import { NO_AUTOCORRECT } from "../lib/inputProps";
 import { errorText } from "../lib/errors";
+import { dumpPrefs, flushPrefs } from "../lib/prefsSync";
 import type { Feed, Rule, RuleAction, RuleField, RulePreview } from "../types";
 import Icon, { type IconName } from "./Icon";
 import ConfirmDialog from "./ConfirmDialog";
 import FeedAvatar from "./FeedAvatar";
+import PromptDialog from "./PromptDialog";
 
 interface Props {
   onClose: () => void;
@@ -1605,6 +1608,68 @@ function DangerZone({ onToast }: { onToast: (m: string) => void }) {
   const qc = useQueryClient();
   const [confirming, setConfirming] = useState<null | "reset" | "clear">(null);
 
+  // ── portable library: where the data lives ──
+  const [dataLoc, setDataLoc] = useState<api.DataLocation | null>(null);
+  /** Open the path prompt with this value (the current directory). */
+  const [dirPrompt, setDirPrompt] = useState<string | null>(null);
+  /** A directory holding a library already, awaiting the user's "use it". */
+  const [adoptTarget, setAdoptTarget] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getDataLocation().then(setDataLoc).catch(() => {});
+  }, []);
+
+  /** Move the library, then relaunch — the running database connection cannot
+   *  follow the move, so nothing else would take effect until a restart. */
+  const moveTo = async (path: string, mode: "copy" | "adopt") => {
+    try {
+      // Make sure the sidecar is current before it is carried across; a pending
+      // debounce would otherwise write the pre-move preferences afterwards.
+      flushPrefs();
+      await api.setDataLocation(path, mode, dumpPrefs());
+      onToast(t("settings.advanced.dataLocationMoved"));
+      setTimeout(() => void relaunch(), 900);
+    } catch (e) {
+      reportError(e);
+    }
+  };
+
+  const applyDataDir = async (raw: string) => {
+    const path = raw.trim();
+    if (!path) return;
+    try {
+      const probe = await api.probeDataDir(path);
+      if (!probe.writable) {
+        onToast(
+          t("settings.advanced.dataLocationUnwritable", {
+            error: probe.error ?? "",
+          }),
+        );
+        return;
+      }
+      // Nothing is ever overwritten silently: a directory that already holds a
+      // library is adopted only after the user confirms (below).
+      if (probe.hasData) {
+        setAdoptTarget(path);
+        return;
+      }
+      await moveTo(path, "copy");
+    } catch (e) {
+      reportError(e);
+    }
+  };
+
+  const resetDataDir = async () => {
+    try {
+      await api.resetDataLocation();
+      const next = await api.getDataLocation();
+      setDataLoc(next);
+      onToast(t("settings.advanced.dataLocationResetDone"));
+    } catch (e) {
+      reportError(e);
+    }
+  };
+
   const doReset = async () => {
     try {
       await api.resetSettings();
@@ -1644,6 +1709,43 @@ function DangerZone({ onToast }: { onToast: (m: string) => void }) {
   return (
     <div className="settings-group">
       <h3 className="settings-group-title">{t("settings.advanced.dangerZone")}</h3>
+      {/* Portable library: put the database (and the preferences travelling
+          with it) on a USB stick, so another computer opens the same library
+          with the same settings. */}
+      <Row
+        label={t("settings.advanced.dataLocation")}
+        desc={
+          dataLoc
+            ? t("settings.advanced.dataLocationDesc", { dir: dataLoc.dir })
+            : t("settings.advanced.calculating")
+        }
+      >
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="s-btn"
+            onClick={() => setDirPrompt(dataLoc?.dir ?? "")}
+          >
+            {t("settings.advanced.dataLocationChange")}
+          </button>
+          {dataLoc?.custom && (
+            <button className="s-btn" onClick={resetDataDir}>
+              {t("settings.advanced.dataLocationReset")}
+            </button>
+          )}
+        </div>
+      </Row>
+      {dataLoc?.fellBack && (
+        <p
+          style={{
+            margin: "0 0 10px",
+            fontSize: 12.5,
+            color: "var(--danger)",
+            lineHeight: 1.5,
+          }}
+        >
+          {t("settings.advanced.dataLocationFellBack", { dir: dataLoc.dir })}
+        </p>
+      )}
       <Row
         label={t("settings.advanced.resetSettings")}
         desc={t("settings.advanced.resetSettingsDesc")}
@@ -1676,6 +1778,30 @@ function DangerZone({ onToast }: { onToast: (m: string) => void }) {
           confirmLabel={t("common.delete")}
           onConfirm={doClear}
           onClose={() => setConfirming(null)}
+        />
+      )}
+      {dirPrompt !== null && (
+        <PromptDialog
+          title={t("settings.advanced.dataLocationTitle")}
+          initialValue={dirPrompt}
+          placeholder={t("settings.advanced.dataLocationPlaceholder")}
+          confirmLabel={t("settings.advanced.dataLocationApply")}
+          onSubmit={(v) => void applyDataDir(v)}
+          onClose={() => setDirPrompt(null)}
+        />
+      )}
+      {adoptTarget !== null && (
+        <ConfirmDialog
+          title={t("settings.advanced.dataLocationAdoptTitle")}
+          message={t("settings.advanced.dataLocationAdoptMessage", {
+            dir: adoptTarget,
+          })}
+          confirmLabel={t("settings.advanced.dataLocationAdopt")}
+          // Adopting destroys nothing — it only points the app at an existing
+          // library — so the confirm button is not styled as destructive.
+          danger={false}
+          onConfirm={() => void moveTo(adoptTarget, "adopt")}
+          onClose={() => setAdoptTarget(null)}
         />
       )}
     </div>

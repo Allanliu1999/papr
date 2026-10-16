@@ -397,3 +397,50 @@ export const closePageView = () => invoke<void>("close_page_view");
 
 export const configureAiProvider = (provider: string, model?: string, baseUrl?: string) =>
   invoke<[string, string]>("configure_ai_provider", { provider, model, baseUrl });
+
+// ── data location (portable library) ──
+/** Where the database lives right now, and whether that is a pinned directory
+ *  (plus whether a pin had to be fallen back from). */
+export interface DataLocation {
+  dir: string;
+  defaultDir: string;
+  custom: boolean;
+  fellBack: boolean;
+}
+export const getDataLocation = () => invoke<DataLocation>("get_data_location");
+
+/** Inspect a candidate directory before writing anything into it. */
+export interface DataDirProbe {
+  writable: boolean;
+  /** A `papr.db` is already there — there is a library to adopt. */
+  hasData: boolean;
+  error: string | null;
+}
+export const probeDataDir = (path: string) =>
+  invoke<DataDirProbe>("probe_data_dir", { path });
+
+/** Point the app at `path`. `mode` is `"copy"` (into an empty directory),
+ *  `"replace"` (over an existing library) or `"adopt"` (use the one already
+ *  there). `prefsJson` travels beside the database so the UI preferences move
+ *  with it. The app must be relaunched afterwards — the open database
+ *  connection cannot follow the move. */
+export const setDataLocation = (
+  path: string,
+  mode: "copy" | "replace" | "adopt",
+  prefsJson?: string,
+) =>
+  invoke<void>("set_data_location", {
+    path,
+    mode,
+    prefsJson: prefsJson ?? null,
+  });
+
+/** Forget the pinned directory: the next launch uses the default one again.
+ *  Nothing is moved or deleted. */
+export const resetDataLocation = () => invoke<void>("reset_data_location");
+
+/** The webview preferences stored beside the database, if any. */
+export const readWebviewPrefs = () => invoke<string | null>("read_webview_prefs");
+/** Write the webview preferences beside the database (best-effort). */
+export const writeWebviewPrefs = (json: string) =>
+  invoke<void>("write_webview_prefs", { json });

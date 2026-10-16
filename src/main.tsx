@@ -1,10 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import "./i18n";
-import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { isMac } from "./lib/platform";
+import { pullPrefs, schedulePush } from "./lib/prefsSync";
 // Bundle the UI / reader fonts so Windows and Linux render with the
 // same letterforms macOS sees, instead of falling through to Arial / DejaVu.
 // Variable-weight woff2 — one file per family covers every weight the styles
@@ -43,12 +42,31 @@ const queryClient = new QueryClient({
   },
 });
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <App />
-      </QueryClientProvider>
-    </ErrorBoundary>
-  </React.StrictMode>,
-);
+// Boot in an async function rather than with top-level `await`: the app has to
+// pause for `pullPrefs` *before* importing the modules that read localStorage
+// while their body runs (`./i18n`, `./store`), and a plain async wrapper avoids
+// depending on the bundler's top-level-await support.
+async function bootstrap() {
+  await pullPrefs();
+  const [{ default: App }, { useUi }] = await Promise.all([
+    import("./App"),
+    import("./store"),
+  ]);
+
+  // Mirror every preference change back beside the database, so a setting
+  // tweaked here is already there when the same drive is opened on another
+  // computer. (Coalesced, and skipped when nothing persisted actually changed.)
+  useUi.subscribe(() => schedulePush());
+
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <App />
+        </QueryClientProvider>
+      </ErrorBoundary>
+    </React.StrictMode>,
+  );
+}
+
+void bootstrap();

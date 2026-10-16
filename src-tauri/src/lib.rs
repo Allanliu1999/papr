@@ -6,7 +6,7 @@
 // `papr-core` (shared with the agent CLI). Re-export them under their original
 // crate paths so the rest of the app keeps referring to `crate::db`,
 // `crate::ingestion`, etc. unchanged.
-pub use papr_core::{ai, db, error, extraction, ingestion, models, opml, sanitize, sync};
+pub use papr_core::{ai, db, error, extraction, ingestion, location, models, opml, sanitize, sync};
 
 mod backing;
 mod commands;
@@ -81,11 +81,20 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            // ── Data location ─────────────────────────────────────────
+            // Normally the platform's app-data directory, but the user can pin
+            // it elsewhere (a USB stick, say) through the pointer file under
+            // the config dir. An unreachable pin — an unplugged drive — falls
+            // back to the default rather than refusing to start, so the app is
+            // always launchable and the user can point it back from Settings.
+            let config_dir = app.path().app_config_dir()?;
+            let default_data_dir = app.path().app_data_dir()?;
+            let resolved = location::resolve(&config_dir, &default_data_dir);
+
             // ── Database ──────────────────────────────────────────────
             let opened = (|| -> Result<_, Box<dyn std::error::Error>> {
-                let data_dir = app.path().app_data_dir()?;
-                fs::create_dir_all(&data_dir)?;
-                let db_path = data_dir.join("papr.db");
+                fs::create_dir_all(&resolved.dir)?;
+                let db_path = resolved.dir.join(location::DB_FILE);
                 let conn = db::open(&db_path)?;
                 let readers = (0..READ_POOL_SIZE)
                     .map(|_| db::open_reader(&db_path))
@@ -128,7 +137,14 @@ pub fn run() {
             let theme = db::get_setting(&conn, "theme").ok().flatten();
             let dark_shade = db::get_setting(&conn, "dark_shade").ok().flatten();
 
-            app.manage(AppState::new(conn, readers, http));
+            app.manage(AppState::new(
+                conn,
+                readers,
+                http,
+                config_dir,
+                default_data_dir,
+                resolved.dir.clone(),
+            ));
 
             // ── papr:// deep links (feature F6) ───────────────────────
             // Registered after `app.manage` so the handler can always reach
@@ -300,6 +316,12 @@ pub fn run() {
             commands::refresh_tray,
             commands::set_native_backing,
             commands::take_pending_deep_link,
+            commands::get_data_location,
+            commands::probe_data_dir,
+            commands::set_data_location,
+            commands::reset_data_location,
+            commands::read_webview_prefs,
+            commands::write_webview_prefs,
             commands::list_tags,
             commands::create_tag,
             commands::rename_tag,

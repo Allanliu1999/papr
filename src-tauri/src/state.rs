@@ -3,6 +3,7 @@
 
 use reqwest::Client;
 use rusqlite::Connection;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 use tokio::sync::Mutex;
@@ -34,11 +35,28 @@ pub struct AppState {
     /// (`take_pending_deep_link`); a live link, arriving after the listener
     /// exists, is emitted directly and never lands here.
     pending_deep_link: std::sync::Mutex<Option<String>>,
+    /// Where the app's config lives — the directory holding the data-location
+    /// pointer. Fixed for the process: it is what *resolves* the data directory.
+    pub config_dir: PathBuf,
+    /// The platform default data directory, kept so "restore the default" and
+    /// the fallback can both name it without re-querying the path resolver.
+    pub default_data_dir: PathBuf,
+    /// The active data directory. Behind a lock because changing it (the
+    /// portable-data feature) takes effect immediately for the preference
+    /// sidecar, even though the database itself only moves on the next launch.
+    data_dir: RwLock<PathBuf>,
 }
 
 impl AppState {
     /// Build the shared state. `readers` must be non-empty.
-    pub fn new(db: Connection, readers: Vec<Connection>, http: Client) -> Self {
+    pub fn new(
+        db: Connection,
+        readers: Vec<Connection>,
+        http: Client,
+        config_dir: PathBuf,
+        default_data_dir: PathBuf,
+        data_dir: PathBuf,
+    ) -> Self {
         assert!(!readers.is_empty(), "read pool must have at least one connection");
         Self {
             db: Mutex::new(db),
@@ -47,7 +65,28 @@ impl AppState {
             http: RwLock::new(http),
             refresh_lock: Mutex::new(()),
             pending_deep_link: std::sync::Mutex::new(None),
+            config_dir,
+            default_data_dir,
+            data_dir: RwLock::new(data_dir),
         }
+    }
+
+    /// The active data directory (the one holding `papr.db` and the preference
+    /// sidecar). Cloned out rather than borrowed, so the lock is never held
+    /// while doing file I/O.
+    pub fn data_dir(&self) -> PathBuf {
+        self.data_dir
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Point the state at a new data directory — called after a successful
+    /// move, so the preference sidecar is written beside the database the user
+    /// just chose (the running connection still refers to the old file until
+    /// the relaunch).
+    pub fn set_data_dir(&self, dir: PathBuf) {
+        *self.data_dir.write().unwrap_or_else(|e| e.into_inner()) = dir;
     }
 
     /// Stash a deep-link URL that arrived before the webview could receive it,

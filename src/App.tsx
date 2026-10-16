@@ -243,6 +243,23 @@ export default function App() {
   // Article-action failures route to an error toast, not a silent default one.
   const actions = useArticleActions(toastApi.error);
 
+  // If the pinned data directory was unreachable at launch (a USB stick that
+  // isn't plugged in), the backend quietly fell back to the default one. Say so
+  // once — otherwise the user just sees an empty or stale library with no
+  // explanation. Settings → Advanced repeats this with the path and a way back.
+  useEffect(() => {
+    api
+      .getDataLocation()
+      .then((loc) => {
+        if (loc.fellBack)
+          toastApi.error(t("settings.advanced.dataLocationFellBack", { dir: loc.dir }));
+      })
+      .catch(() => {});
+    // Runs once on mount: this reports a launch-time condition, and re-running
+    // on a language change would only repeat the same notice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── background refresh events from the Rust scheduler ──
   useEffect(() => {
     const un = listen("feeds-updated", () => {

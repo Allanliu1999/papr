@@ -1842,7 +1842,14 @@ fn db_path(cli: &Cli) -> Result<PathBuf, AxiError> {
     if let Some(p) = &cli.db {
         return Ok(p.clone());
     }
-    Ok(app_data_dir()?.join(APP_IDENTIFIER).join("papr.db"))
+    // Honour the data directory the app pinned (Settings → Advanced → data
+    // location), so the CLI reads the same library the app shows. Resolution
+    // lives in `papr_core::location` precisely so the two agree — including the
+    // "pinned directory unreachable → fall back to the default" rule.
+    let pointer_dir = app_config_dir()?.join(APP_IDENTIFIER);
+    let default_dir = app_data_dir()?.join(APP_IDENTIFIER);
+    let resolved = papr_core::location::resolve(&pointer_dir, &default_dir);
+    Ok(resolved.dir.join(papr_core::location::DB_FILE))
 }
 
 /// The platform application-data directory Tauri stores the DB under.
@@ -1866,6 +1873,33 @@ fn app_data_dir() -> Result<PathBuf, AxiError> {
         }
         let home = std::env::var("HOME").map_err(|_| home_err())?;
         Ok(PathBuf::from(home).join(".local/share"))
+    }
+}
+
+/// The platform *config* directory — where the data-location pointer file
+/// lives (`papr_core::location`). Matches Tauri's `app_config_dir` base, so the
+/// CLI finds the pointer the app wrote. On Windows this is the same directory
+/// as `app_data_dir`; on Linux it is `$XDG_CONFIG_HOME` / `~/.config`.
+fn app_config_dir() -> Result<PathBuf, AxiError> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").map_err(|_| home_err())?;
+        Ok(PathBuf::from(home).join("Library/Application Support"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA").map_err(|_| home_err())?;
+        Ok(PathBuf::from(appdata))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Ok(x) = std::env::var("XDG_CONFIG_HOME") {
+            if !x.is_empty() {
+                return Ok(PathBuf::from(x));
+            }
+        }
+        let home = std::env::var("HOME").map_err(|_| home_err())?;
+        Ok(PathBuf::from(home).join(".config"))
     }
 }
 

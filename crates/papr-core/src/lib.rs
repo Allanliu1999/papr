@@ -14,6 +14,9 @@ pub mod db;
 pub mod error;
 pub mod extraction;
 pub mod ingestion;
+/// Where the database lives, and how that location is changed. Shared by the
+/// desktop app and the CLI so both resolve the same file.
+pub mod location;
 pub mod models;
 pub mod opml;
 pub mod sanitize;

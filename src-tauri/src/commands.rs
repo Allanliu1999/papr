@@ -1402,6 +1402,133 @@ pub async fn take_pending_deep_link(state: State<'_, AppState>) -> AppResult<Opt
     Ok(state.take_pending_deep_link())
 }
 
+// ─────────────────── data location (portable install) ───────────────────
+
+/// Where the library lives right now — shown in Settings → Advanced, and the
+/// source of the "we fell back to the default" notice.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataLocation {
+    dir: String,
+    default_dir: String,
+    /// A directory is pinned, even if it is currently unusable.
+    custom: bool,
+    /// A pin was set but unreachable, so `dir` is the default one.
+    fell_back: bool,
+}
+
+#[tauri::command]
+pub async fn get_data_location(state: State<'_, AppState>) -> AppResult<DataLocation> {
+    let resolved = crate::location::resolve(&state.config_dir, &state.default_data_dir);
+    Ok(DataLocation {
+        dir: resolved.dir.to_string_lossy().into_owned(),
+        default_dir: state.default_data_dir.to_string_lossy().into_owned(),
+        custom: resolved.custom,
+        fell_back: resolved.fell_back,
+    })
+}
+
+/// Inspect a candidate directory *before* anything is written: is it usable,
+/// and does it already hold a library the user might want to adopt?
+#[tauri::command]
+pub async fn probe_data_dir(path: String) -> crate::location::Probe {
+    crate::location::probe(std::path::Path::new(&path))
+}
+
+/// What to do with a library already sitting at the target directory.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DataMove {
+    /// Copy the live library into an empty target.
+    Copy,
+    /// Copy over a target that already holds one (the user confirmed the loss).
+    Replace,
+    /// Use the target's own library as-is, without copying anything.
+    Adopt,
+}
+
+/// Point Papr at `path` — moving the library there, or adopting the one already
+/// there — and write the webview preferences beside it so they travel too.
+///
+/// The open SQLite connection cannot follow the move, so this deliberately does
+/// not relaunch: it returns, and the caller restarts the app. Until that
+/// restart the running connection still reads the old file; only the preference
+/// sidecar (written on every settings change) uses the new directory at once.
+#[tauri::command]
+pub async fn set_data_location(
+    state: State<'_, AppState>,
+    path: String,
+    mode: DataMove,
+    prefs_json: Option<String>,
+) -> AppResult<()> {
+    if path.trim().is_empty() {
+        return Err(AppError::code("dataDirEmpty"));
+    }
+    let target = PathBuf::from(path.trim());
+    if target == state.data_dir() {
+        return Err(AppError::code("dataDirUnchanged"));
+    }
+    let probe = crate::location::probe(&target);
+    if !probe.writable {
+        return Err(AppError::other(
+            probe.error.unwrap_or_else(|| "the directory is not writable".into()),
+        ));
+    }
+
+    let db_file = target.join(crate::location::DB_FILE);
+    match mode {
+        DataMove::Adopt => {
+            if !db_file.is_file() {
+                return Err(AppError::code("dataDirNoData"));
+            }
+        }
+        DataMove::Copy | DataMove::Replace => {
+            // `copy_db` refuses to overwrite, which is the safety we want; the
+            // "replace" case deletes first because the user explicitly chose it.
+            if db_file.exists() {
+                if matches!(mode, DataMove::Copy) {
+                    return Err(AppError::code("dataDirOccupied"));
+                }
+                std::fs::remove_file(&db_file).map_err(|e| AppError::other(e.to_string()))?;
+            }
+            let conn = state.db.lock().await;
+            crate::location::copy_db(&conn, &db_file).map_err(AppError::other)?;
+        }
+    }
+
+    if let Some(json) = prefs_json {
+        crate::location::write_prefs(&target, &json).map_err(AppError::other)?;
+    }
+    crate::location::write_pointer(&state.config_dir, Some(&target)).map_err(AppError::other)?;
+    // Recorded immediately, so a preference change made before the relaunch
+    // lands beside the database the user just chose.
+    state.set_data_dir(target);
+    Ok(())
+}
+
+/// Forget the pinned directory: the next launch uses the default one again.
+/// Nothing is moved or deleted — the files where the library currently sits
+/// stay exactly where they are.
+#[tauri::command]
+pub async fn reset_data_location(state: State<'_, AppState>) -> AppResult<()> {
+    crate::location::write_pointer(&state.config_dir, None).map_err(AppError::other)
+}
+
+/// The preference sidecar beside the database, if one is there. Read once at
+/// startup, so UI preferences follow the library to another machine.
+#[tauri::command]
+pub async fn read_webview_prefs(state: State<'_, AppState>) -> AppResult<Option<String>> {
+    Ok(crate::location::read_prefs(&state.data_dir()))
+}
+
+/// Persist the webview's preferences beside the database. Called on every
+/// settings change, so a failure (an unplugged drive) must not surface as an
+/// error the user has to dismiss — the frontend swallows it.
+#[tauri::command]
+pub async fn write_webview_prefs(state: State<'_, AppState>, json: String) -> AppResult<()> {
+    crate::location::write_prefs(&state.data_dir(), &json).map_err(AppError::other)
+}
+
 // ─────────────────────────── tags ───────────────────────────
 
 #[tauri::command]
