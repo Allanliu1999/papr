@@ -126,6 +126,15 @@ export default function ArticleList({ onToast }: Props) {
     if (listTitleOnly) return base - 30;
     return showListThumbs ? base + 8 : base;
   })();
+  // Whether list rows show a thumbnail at all.
+  //
+  // This drives the `has-thumb` class on the row, which is what puts the image
+  // and the text side by side. It is deliberately a class rather than a `:has()`
+  // selector in styles.css: the layout of the whole row hangs off this one
+  // condition, and a selector that silently stops matching turns the image back
+  // into an in-flow block that pushes the text off-screen.
+  const withListThumb =
+    viewMode === "list" && showListThumbs && !listTitleOnly;
   const virt = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
@@ -629,7 +638,7 @@ export default function ArticleList({ onToast }: Props) {
                       selectedId === a.id ? "active" : ""
                     } ${a.isRead ? "read" : ""} ${
                       listTitleOnly ? "title-only" : ""
-                    }`}
+                    } ${withListThumb && a.imageUrl ? "has-thumb" : ""}`}
                     role="option"
                     id={`option-article-${a.id}`}
                     aria-selected={selectedId === a.id}
@@ -659,22 +668,23 @@ export default function ArticleList({ onToast }: Props) {
                         recycles this row for a different article, the element is
                         rebuilt rather than keeping the previous image's hidden
                         state (see the onError handler). */}
-                    {viewMode === "list" &&
-                      showListThumbs &&
-                      !listTitleOnly &&
-                      a.imageUrl && (
-                        <img
-                          key={a.imageUrl}
-                          className="art-side-thumb"
-                          src={a.imageUrl}
-                          alt=""
-                          loading="lazy"
-                          draggable={false}
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                          }}
-                        />
-                      )}
+                    {withListThumb && a.imageUrl && (
+                      <img
+                        key={a.imageUrl}
+                        className="art-side-thumb"
+                        src={a.imageUrl}
+                        alt=""
+                        loading="lazy"
+                        draggable={false}
+                        onError={(e) => {
+                          // Fall back to a text-only row rather than showing a
+                          // broken-image box. The row keeps the `has-thumb`
+                          // class, so there is a slight indent where the image
+                          // would have been; that matches the pre-load state.
+                          e.currentTarget.style.display = "none";
+                        }}
+                      />
+                    )}
                     <div className="art-head">
                       {!a.isRead && <span className="art-dot" />}
                       <span className="art-feed">{a.feedTitle}</span>

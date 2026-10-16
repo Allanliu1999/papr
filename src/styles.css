@@ -52,6 +52,11 @@
   /* density */
   --row-py: 14px;
   --list-px: 18px;
+  /* List-row thumbnail size. The per-density values live on `[data-density=…]`
+     below; these copies are the fallback, so the thumbnail still gets a real
+     size even if `data-density` is ever absent from the document root. */
+  --art-thumb-h: 78px;
+  --art-thumb-w: 117px;
 
   /* type — bundled variable woff2 first (see main.tsx), then platform
      fallbacks so a missing/blocked font doesn't drop to a system serif. */
@@ -812,10 +817,14 @@ button { font-family: inherit; }
 }
 /* A row whose article has a body image: the image sits in its own strip at the
    start of the row and the text runs beside it — side by side, never on top of
-   each other. Keyed on the element actually being rendered, so a row without an
-   image (or whose image failed to load) keeps its full width instead of showing
-   an empty gap. */
-.art:has(> .art-side-thumb) {
+   each other.
+ *
+ *  Driven by the `has-thumb` class that the list component puts on the row,
+ *  rather than by `:has(> .art-side-thumb)`. The whole row layout hangs off this
+ *  condition, so it uses the most basic selector available: if a fancier one
+ *  silently stops matching, the image falls back into normal flow, becomes a
+ *  full-width block and pushes the text out of sight. */
+.art.has-thumb {
   display: flex;
   /* Top-aligned: the image is intentionally 8px taller than the text, so
      centring it would push the first line of text down. */
@@ -831,15 +840,20 @@ button { font-family: inherit; }
  *  whole row height, while the width stays the fixed cap — so its own pixel size
  *  can neither blow the row open nor squeeze the text out of view.
  *
+ *  Every variable is read with a fallback: a missing custom property makes the
+ *  whole declaration invalid at computed-value time, and for `width`/`height`
+ *  that means falling back to the image's intrinsic size — the exact failure
+ *  this layout exists to prevent.
+ *
  *  `object-fit: cover` fills that box; an image wider than the box loses only
  *  its right-hand edge (`object-position: left center` keeps the left), while
  *  the height is never cropped. A narrower image keeps its whole width and the
  *  box's background shows beside it. */
 .art-side-thumb {
   flex: none;
-  margin-block: calc(-1 * var(--row-py));
-  width: var(--art-thumb-w);
-  height: calc(var(--art-thumb-h) + var(--row-py) * 2);
+  margin-block: calc(-1 * var(--row-py, 14px));
+  width: var(--art-thumb-w, 117px);
+  height: calc(var(--art-thumb-h, 78px) + var(--row-py, 14px) * 2);
   object-fit: cover;
   object-position: left center;
   border-radius: 6px;
