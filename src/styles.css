@@ -805,56 +805,39 @@ button { font-family: inherit; }
   position: relative;
   transition: background .12s;
 }
-/* A row whose article has a body image: the thumbnail comes first and the text
-   sits beside it. Keyed on the element actually being rendered, so a row
-   without an image (or whose image failed to load) keeps the full width rather
-   than showing an empty gap. */
-.art:has(> .art-thumb-box) {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-}
-.art-body { flex: 1; min-width: 0; }
-/* The thumbnail box.
- *
- *  Height: it stretches to the row, then `margin-block` pulls it in by
- *  `--row-py - 3px` on each side. Since row height − 2×row-py is exactly the
- *  height of the text block, that leaves the image 3px taller than the text at
- *  the top and 3px at the bottom — the text keeps its own `--row-py` padding,
- *  and the image never makes the row taller.
- *
- *  Width: capped at 150% of that height, expressed as the 3:2 aspect ratio.
- *  There is no `max-width` form for "1.5 × my own height", so the cap has to be
- *  the ratio itself. It only works because the <img> below is absolutely
- *  positioned: a laid-out image would hand the box its intrinsic width (a
- *  1200px photo), which `min-width: 0` alone does not undo — `flex-basis: auto`
- *  still resolves to that content width, and overrides the ratio.
- *
- *  A wider image overflows and is clipped by `overflow: hidden`; the height is
- *  always shown in full, so nothing is ever cropped vertically. */
-.art-thumb-box {
-  position: relative;
-  align-self: stretch;
-  margin-block: calc(var(--row-py) - 3px);
-  aspect-ratio: 3 / 2;
-  max-width: 100%;
-  min-width: 0;
-  flex-shrink: 0;
+/* A row whose article has a body image: the image occupies a reserved strip on
+   the left and the text is indented past it. Keyed on the element actually
+   being rendered, so a row without an image (or whose image failed to load)
+   keeps its full width instead of showing an empty gap. */
+.art:has(> .art-side-thumb) {
+  /* Clips a too-wide image. It never clips vertically — the image's height comes
+     from its own top/bottom insets below, not from this box. */
   overflow: hidden;
+  /* Room for the image, as a share of the row's own width. CSS has no way to
+     express "1.5 × the image's height" here, so this is deliberately an
+     approximation: a wide image fills the strip and gets clipped, a narrow one
+     leaves a little space to its right. */
+  padding-left: calc(var(--list-px) + 40%);
+}
+/* The image itself.
+ *
+ *  Height: `top` and `bottom` inset it by `--row-py - 4px` on each side. Since
+ *  row height − 2×row-py is exactly the height of the row's text block, that
+ *  works out to text height + 8px — the cap, never exceeded. Being absolutely
+ *  positioned, it also never makes the row taller.
+ *
+ *  Width: taken from the image's own proportions at that height. Anything wider
+ *  than the reserved strip is clipped by the rule above; the height is never
+ *  cropped. */
+.art-side-thumb {
+  position: absolute;
+  left: var(--list-px);
+  top: calc(var(--row-py) - 4px);
+  bottom: calc(var(--row-py) - 4px);
+  height: auto;
+  width: auto;
   border-radius: 6px;
   background: var(--accent-soft);
-}
-/* Taken out of flow so the box's width comes from the aspect ratio alone.
-   Scaled to the box's full height with its own proportions kept: a narrow image
-   simply doesn't reach the right edge (the box colour shows through), a wide one
-   overflows and is clipped by the rule above. */
-.art-thumb-box img {
-  position: absolute;
-  left: 0;
-  top: 0;
-  height: 100%;
-  width: auto;
-  display: block;
 }
 .art:hover { background: var(--hover); }
 .art.active { background: var(--accent-soft); }

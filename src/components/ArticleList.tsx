@@ -636,15 +636,29 @@ export default function ArticleList({ onToast }: Props) {
                     {viewMode === "card" && showCardThumbs && (
                       <CardThumb article={a} />
                     )}
-                    {/* List view: the article's first body image, sized to the
-                        row and scaled (never cropped), so the text beside it
-                        starts a little further in. Rows without an image render
-                        nothing here and keep the full width — see the
-                        `:has()` rule in styles.css. */}
-                    {viewMode === "list" && showListThumbs && (
-                      <ListThumb article={a} />
+                    {/* List view: the article's first body image. Absolutely
+                        positioned by `.art-side-thumb`, so it never affects the
+                        row's height or squeezes the text — it just sits in the
+                        strip the row reserves for it. A row without an image
+                        renders nothing here and keeps its full width.
+
+                        `${a.imageUrl}` doubles as the key: when the virtualizer
+                        recycles this row for a different article, the element is
+                        rebuilt rather than keeping the previous image's hidden
+                        state (see the onError handler). */}
+                    {viewMode === "list" && showListThumbs && a.imageUrl && (
+                      <img
+                        key={a.imageUrl}
+                        className="art-side-thumb"
+                        src={a.imageUrl}
+                        alt=""
+                        loading="lazy"
+                        draggable={false}
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
+                      />
                     )}
-                    <div className="art-body">
                     <div className="art-head">
                       {!a.isRead && <span className="art-dot" />}
                       <span className="art-feed">{a.feedTitle}</span>
@@ -696,7 +710,6 @@ export default function ArticleList({ onToast }: Props) {
                         {rt.snippet}
                       </p>
                     )}
-                    </div>
                   </div>
                 </div>
               );
@@ -747,39 +760,6 @@ function CardThumb({ article }: { article: ArticleSummary }) {
           height: "100%",
           objectFit: "cover",
         }}
-      />
-    </div>
-  );
-}
-
-/** The article's first body image, shown beside a list row.
- *
- *  The box is as tall as the row's own content (title and snippet decide that —
- *  the image never stretches the row) and capped at 150% of that height in
- *  width. The image itself is always scaled to the box's full height and keeps
- *  its own proportions, so nothing is ever cropped vertically; only an image
- *  wider than the cap overflows and gets clipped horizontally. See the
- *  `.art-thumb-box` rules in styles.css.
- *
- *  Renders nothing when there is no image or it fails to load; the row then
- *  keeps its full width, because the indent is driven by this element's
- *  presence (`:has()` in styles.css). */
-function ListThumb({ article }: { article: ArticleSummary }) {
-  const [broken, setBroken] = useState(false);
-  // The virtualizer recycles this instance across rows — clear the error flag
-  // whenever the image URL changes.
-  useEffect(() => setBroken(false), [article.imageUrl]);
-
-  if (!article.imageUrl || broken) return null;
-
-  return (
-    <div className="art-thumb-box">
-      <img
-        src={article.imageUrl}
-        alt=""
-        loading="lazy"
-        draggable={false}
-        onError={() => setBroken(true)}
       />
     </div>
   );
