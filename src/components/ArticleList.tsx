@@ -114,17 +114,17 @@ export default function ArticleList({ onToast }: Props) {
   // roughly a line and a half of preview text per row. (These were already
   // estimates rather than measurements — see `estimateSize` below.)
   //
-  // The list thumbnail does not change the row height: it is a fixed square
-  // whose size is already row height − 16px, the 16px going to its 8px margins
-  // (see `--art-thumb-size` in styles.css). So the estimates below hold whether
-  // or not images are shown.
+  // The list thumbnail is 8px taller than the row's text block (see
+  // `--art-thumb-h` in styles.css), so a list row with an image is 8px taller
+  // than one without and the estimate has to follow — otherwise the scrollbar
+  // length and the scroll position drift against the real content.
   const rowEstimate = (() => {
     if (viewMode === "card") return listTitleOnly ? 285 : 320;
     const base = density === "compact" ? 78 : density === "spacious" ? 122 : 98;
     // Title-only rows never show a thumbnail (see the render below), so this
     // only applies to the normal list.
     if (listTitleOnly) return base - 30;
-    return base;
+    return showListThumbs ? base + 8 : base;
   })();
   // Whether list rows show a thumbnail at all.
   //
@@ -653,12 +653,11 @@ export default function ArticleList({ onToast }: Props) {
                     {viewMode === "card" && showCardThumbs && (
                       <CardThumb article={a} />
                     )}
-                    {/* List view: the article's first body image, in a fixed
-                        square before the text — the same shape Fluent Reader
-                        gives its list cards (a `head` box beside a `data`
-                        column). The square is sized by `--art-thumb-size` and
-                        `object-fit: cover` fills it exactly, so the image can
-                        neither stretch the row nor shrink to nothing.
+                    {/* List view: the article's first body image, rendered
+                        before the text so every line is indented past it. The
+                        box is a fixed square (`--art-thumb-h` = text height
+                        + 8px, and the same value caps its width), and the image
+                        scales to fit inside it without being cropped.
 
                         A row without an image renders nothing here and keeps
                         its full width.
@@ -668,17 +667,17 @@ export default function ArticleList({ onToast }: Props) {
                         row estimate there assumes no thumbnail). */}
                     {withListThumb && a.imageUrl && (
                       <div className="art-list-thumb">
+                        {/* No `onError` handler on purpose. Hiding a failed
+                            image made "the image never appeared" and "the image
+                            failed to load" look identical from the outside;
+                            a visible broken-image box tells the two apart. The
+                            row's box keeps its background either way, so the
+                            layout is stable while the image loads. */}
                         <img
                           src={a.imageUrl}
                           alt=""
                           loading="lazy"
                           draggable={false}
-                          onError={(e) => {
-                            // Fall back to a text-only row rather than leaving a
-                            // broken-image box behind. Hiding only the image
-                            // keeps the row's shape stable while it loads.
-                            e.currentTarget.style.display = "none";
-                          }}
                         />
                       </div>
                     )}
