@@ -130,12 +130,14 @@ export default function FeedEditDialog({ feed, onSave, onClose }: Props) {
           <label htmlFor="feed-edit-icon">{t("sidebar.feedEditIcon")}</label>
           <div className="feed-edit-icon-row">
             {/* Live preview: falls back to the letter avatar when the URL is
-                blank or fails to load (FeedAvatar handles the error). */}
+                blank or fails to load (FeedAvatar handles the error).
+                No size override — it uses `.sb-feed-avatar`'s own default, and
+                the container rule in styles.css scales a non-square image down
+                to fit rather than cropping it. */}
             <FeedAvatar
               title={trimmedTitle || feed.title}
               faviconUrl={trimmedIcon || null}
               seed={feed.id}
-              style={{ width: 26, height: 26, borderRadius: 6 }}
             />
             <input
               id="feed-edit-icon"
