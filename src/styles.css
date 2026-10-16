@@ -292,9 +292,9 @@
   background: var(--accent);
 }
 
-[data-density="compact"] { --row-py: 10px; --list-px: 14px; }
-[data-density="cozy"]    { --row-py: 14px; --list-px: 18px; }
-[data-density="spacious"]{ --row-py: 20px; --list-px: 24px; }
+[data-density="compact"] { --row-py: 10px; --list-px: 14px; --art-thumb-h: 40px; }
+[data-density="cozy"]    { --row-py: 14px; --list-px: 18px; --art-thumb-h: 52px; }
+[data-density="spacious"]{ --row-py: 20px; --list-px: 24px; --art-thumb-h: 66px; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -804,6 +804,28 @@ button { font-family: inherit; }
   cursor: pointer;
   position: relative;
   transition: background .12s;
+}
+/* A row whose article has a body image: the thumbnail comes first and the text
+   sits beside it. Keyed on the element actually being rendered, so a row
+   without an image (or whose image failed to load) keeps the full width rather
+   than showing an empty gap. */
+.art:has(> .art-side-thumb) {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.art-body { flex: 1; min-width: 0; }
+/* Fitted, never cropped: a wide banner keeps its whole width and simply ends up
+   short. The height follows the density, so the thumbnail never makes a row
+   taller than the list's row estimate expects. */
+.art-side-thumb {
+  height: var(--art-thumb-h, 52px);
+  width: auto;
+  max-width: 40%;
+  flex-shrink: 0;
+  object-fit: contain;
+  border-radius: 6px;
+  background: var(--accent-soft);
 }
 .art:hover { background: var(--hover); }
 .art.active { background: var(--accent-soft); }

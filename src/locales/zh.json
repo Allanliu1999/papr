@@ -300,6 +300,8 @@
       "sidebarCounts": "侧栏显示未读计数",
       "cardThumbs": "文章卡片显示缩略图",
       "cardThumbsDesc": "仅在卡片视图下生效",
+      "listThumbs": "列表显示缩略图",
+      "listThumbsDesc": "条目正文有图片时，在左侧显示第一张图（等比缩放，不裁剪）；无图则不缩进",
       "reduceMotion": "减少动效",
       "reduceMotionDesc": "关闭界面过渡与动画"
     },

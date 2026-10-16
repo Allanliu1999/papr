@@ -42,6 +42,7 @@ export default function ArticleList({ onToast }: Props) {
   const viewMode = useUi((s) => s.viewMode);
   const density = useUi((s) => s.density);
   const showCardThumbs = useUi((s) => s.prefs.showCardThumbs);
+  const showListThumbs = useUi((s) => s.prefs.showListThumbs);
   const listTitleOnly = useUi((s) => s.prefs.listTitleOnly);
   const selectedId = useUi((s) => s.selectedArticleId);
   const openArticle = useUi((s) => s.openArticle);
@@ -635,6 +636,15 @@ export default function ArticleList({ onToast }: Props) {
                     {viewMode === "card" && showCardThumbs && (
                       <CardThumb article={a} />
                     )}
+                    {/* List view: the article's first body image, sized to the
+                        row and scaled (never cropped), so the text beside it
+                        starts a little further in. Rows without an image render
+                        nothing here and keep the full width — see the
+                        `:has()` rule in styles.css. */}
+                    {viewMode === "list" && showListThumbs && (
+                      <ListThumb article={a} />
+                    )}
+                    <div className="art-body">
                     <div className="art-head">
                       {!a.isRead && <span className="art-dot" />}
                       <span className="art-feed">{a.feedTitle}</span>
@@ -686,6 +696,7 @@ export default function ArticleList({ onToast }: Props) {
                         {rt.snippet}
                       </p>
                     )}
+                    </div>
                   </div>
                 </div>
               );
@@ -738,6 +749,33 @@ function CardThumb({ article }: { article: ArticleSummary }) {
         }}
       />
     </div>
+  );
+}
+
+/** The article's first body image, shown beside a list row.
+ *
+ *  CSS sizes it to the row's own height and scales it with `object-fit:
+ *  contain`, so a wide image is fitted rather than cropped — unlike the card
+ *  thumbnail, where filling the frame reads better. Renders nothing when there
+ *  is no image or it fails to load; the row then keeps its full width, because
+ *  the indent is driven by this element's presence (`:has()` in styles.css). */
+function ListThumb({ article }: { article: ArticleSummary }) {
+  const [broken, setBroken] = useState(false);
+  // The virtualizer recycles this instance across rows — clear the error flag
+  // whenever the image URL changes.
+  useEffect(() => setBroken(false), [article.imageUrl]);
+
+  if (!article.imageUrl || broken) return null;
+
+  return (
+    <img
+      className="art-side-thumb"
+      src={article.imageUrl}
+      alt=""
+      loading="lazy"
+      draggable={false}
+      onError={() => setBroken(true)}
+    />
   );
 }
 

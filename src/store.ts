@@ -101,6 +101,9 @@ export interface Prefs {
   /** List rows show the title only, with no body preview underneath. The
    *  article list keeps its meta line (feed · time · flags) either way. */
   listTitleOnly: boolean;
+  /** List rows show the article's first body image as a thumbnail beside the
+   *  text. Rows without an image are unaffected — no placeholder, no indent. */
+  showListThumbs: boolean;
 }
 
 const ls = {
@@ -227,6 +230,7 @@ const PREF_KEYS: (keyof Prefs)[] = [
   "hideReadOnStartup",
   "sidebarUnreadOnly",
   "listTitleOnly",
+  "showListThumbs",
 ];
 
 /** Mirror the active palette + mode into the backend settings table so the Rust
@@ -293,6 +297,10 @@ function loadPrefs(): Prefs {
     // Off by default, so the list keeps showing each article's body preview and
     // the switch only ever takes that away.
     listTitleOnly: ls.bool("pref.listTitleOnly", false),
+    // On by default: a first-image thumbnail beside a list row is the look
+    // people expect from a reader, and it costs nothing when a feed has no
+    // image (the row simply isn't indented).
+    showListThumbs: ls.bool("pref.showListThumbs", true),
   };
 }
 

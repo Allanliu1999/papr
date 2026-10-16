@@ -300,6 +300,8 @@
       "sidebarCounts": "サイドバーに未読数を表示",
       "cardThumbs": "記事カードにサムネイルを表示",
       "cardThumbsDesc": "カード表示でのみ有効です",
+      "listThumbs": "一覧にサムネイルを表示",
+      "listThumbsDesc": "本文に画像がある場合、先頭の画像を左側に表示します（比率を保って縮小、切り抜きなし）。画像がない行は字下げしません。",
       "reduceMotion": "視差効果を減らす",
       "reduceMotionDesc": "画面のトランジションとアニメーションを無効にします"
     },

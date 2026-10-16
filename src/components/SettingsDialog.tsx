@@ -657,6 +657,15 @@ function AppearanceSection() {
           />
         </Row>
         <Row
+          label={t("settings.appearance.listThumbs")}
+          desc={t("settings.appearance.listThumbsDesc")}
+        >
+          <Toggle
+            checked={prefs.showListThumbs}
+            onChange={(v) => setPref({ showListThumbs: v })}
+          />
+        </Row>
+        <Row
           label={t("settings.appearance.reduceMotion")}
           desc={t("settings.appearance.reduceMotionDesc")}
         >
