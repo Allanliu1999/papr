@@ -673,6 +673,7 @@ function ReadingSection() {
   const readerFont = useUi((s) => s.readerFont);
   const setReaderFont = useUi((s) => s.setReaderFont);
   const readerSize = useUi((s) => s.readerSize);
+  const readerTitleSize = useUi((s) => s.readerTitleSize);
   const readerLeading = useUi((s) => s.readerLeading);
   const readerWidth = useUi((s) => s.readerWidth);
   const setReader = useUi((s) => s.setReader);
@@ -703,6 +704,15 @@ function ReadingSection() {
             max={READER_BOUNDS.size.max}
             unit="px"
             onChange={(v) => setReader({ readerSize: v })}
+          />
+        </Row>
+        <Row label={t("settings.reading.titleSize")}>
+          <Slider
+            value={readerTitleSize}
+            min={READER_BOUNDS.title.min}
+            max={READER_BOUNDS.title.max}
+            unit="px"
+            onChange={(v) => setReader({ readerTitleSize: v })}
           />
         </Row>
         <Row label={t("settings.reading.lineHeight")}>

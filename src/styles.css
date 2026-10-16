@@ -1016,7 +1016,9 @@ button { font-family: inherit; }
 }
 .article-feed:hover { text-decoration: underline; }
 .article-title {
-  font-size: 38px;
+  /* Settings → Reading → Font → title size. The fallback matches the store's
+     default so the first paint (before App.tsx writes the variable) is right. */
+  font-size: var(--reader-title-size, 32px);
   line-height: 1.12;
   font-weight: 650;
   letter-spacing: -0.02em;

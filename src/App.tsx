@@ -89,6 +89,7 @@ export default function App() {
   const effectiveMode: ResolvedMode = mode === "system" ? (systemDark ? "dark" : "light") : mode;
   const readerFont = useUi((s) => s.readerFont);
   const readerSize = useUi((s) => s.readerSize);
+  const readerTitleSize = useUi((s) => s.readerTitleSize);
   const readerLeading = useUi((s) => s.readerLeading);
   const readerWidth = useUi((s) => s.readerWidth);
   const sidebarWidth = useUi((s) => s.sidebarWidth);
@@ -211,9 +212,10 @@ export default function App() {
     root.setProperty("--reader-font", font.stack);
     root.setProperty("--reader-font-adjust", font.adjust);
     root.setProperty("--reader-size", `${readerSize}px`);
+    root.setProperty("--reader-title-size", `${readerTitleSize}px`);
     root.setProperty("--reader-leading", String(readerLeading / 100));
     root.setProperty("--reader-width", `${readerWidth}px`);
-  }, [readerFont, readerSize, readerLeading, readerWidth]);
+  }, [readerFont, readerSize, readerTitleSize, readerLeading, readerWidth]);
 
   // ── apply the draggable pane widths as the grid/drawer CSS variables ──
   // These drive `.window`'s grid columns and the AI drawer's width; the resize

@@ -57,6 +57,9 @@ export const READER_FONTS: Record<ReaderFont, { stack: string; adjust: string }>
  *  `setReader` write guard, so all three stay in lockstep. */
 export const READER_BOUNDS = {
   size: { min: 14, max: 22 },
+  /** The reading pane's article title. A wider range than the body's: headings
+   *  are decorative, so an oversized one is a legitimate choice. */
+  title: { min: 20, max: 72 },
   leading: { min: 130, max: 200 },
   width: { min: 520, max: 840 },
 } as const;
@@ -158,6 +161,9 @@ interface UiState {
   viewMode: ViewMode;
   readerFont: ReaderFont;
   readerSize: number;
+  /** Heading size for the reading pane's article title, in px. Independent of
+   *  `readerSize` — the title keeps its own scale whatever the body is set to. */
+  readerTitleSize: number;
   readerLeading: number;
   readerWidth: number;
 
@@ -194,7 +200,11 @@ interface UiState {
   setDensity: (d: Density) => void;
   setViewMode: (v: ViewMode) => void;
   setReaderFont: (v: ReaderFont) => void;
-  setReader: (p: Partial<Pick<UiState, "readerSize" | "readerLeading" | "readerWidth">>) => void;
+  setReader: (
+    p: Partial<
+      Pick<UiState, "readerSize" | "readerTitleSize" | "readerLeading" | "readerWidth">
+    >,
+  ) => void;
   setPanel: (p: Partial<Pick<UiState, "sidebarWidth" | "listWidth" | "aiWidth">>) => void;
 
   setPref: (patch: Partial<Prefs>) => void;
@@ -307,6 +317,12 @@ export const useUi = create<UiState>((set, get) => ({
   viewMode: ls.oneOf<ViewMode>("viewMode", ["list", "card"], "list"),
   readerFont: loadReaderFont(),
   readerSize: ls.num("readerSize", 17, READER_BOUNDS.size.min, READER_BOUNDS.size.max),
+  readerTitleSize: ls.num(
+    "readerTitleSize",
+    32,
+    READER_BOUNDS.title.min,
+    READER_BOUNDS.title.max,
+  ),
   readerLeading: ls.num(
     "readerLeading",
     165,
@@ -347,10 +363,20 @@ export const useUi = create<UiState>((set, get) => ({
   setReader: (p) => {
     // Clamp on write too: any caller (or a stale slider range) is kept from
     // pushing an out-of-range value into the persisted store or a CSS var.
-    const next: Partial<Pick<UiState, "readerSize" | "readerLeading" | "readerWidth">> = {};
+    const next: Partial<
+      Pick<UiState, "readerSize" | "readerTitleSize" | "readerLeading" | "readerWidth">
+    > = {};
     if (p.readerSize != null) {
       next.readerSize = clamp(p.readerSize, READER_BOUNDS.size.min, READER_BOUNDS.size.max);
       ls.set("readerSize", next.readerSize);
+    }
+    if (p.readerTitleSize != null) {
+      next.readerTitleSize = clamp(
+        p.readerTitleSize,
+        READER_BOUNDS.title.min,
+        READER_BOUNDS.title.max,
+      );
+      ls.set("readerTitleSize", next.readerTitleSize);
     }
     if (p.readerLeading != null) {
       next.readerLeading = clamp(
