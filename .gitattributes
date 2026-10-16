@@ -1,0 +1,17 @@
+# Line endings, fixed for every platform.
+#
+# Without this, what git stores depends on each machine's `core.autocrlf`, so a
+# Windows checkout differs from a Linux CI checkout byte for byte — which shows
+# up as whole-file diffs and, on Windows, as "LF will be replaced by CRLF"
+# warnings on every commit.
+#
+# `text=auto` keeps git's own binary detection (images, app icons, the .webp
+# screenshots are left alone) and `eol=lf` pins both what is stored and what is
+# checked out to LF. Only line endings are affected — no file content is
+# rewritten here, and existing files are normalised as they are next committed.
+* text=auto eol=lf
+
+# Windows command scripts must keep CRLF: cmd.exe mis-parses an LF-only .bat.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

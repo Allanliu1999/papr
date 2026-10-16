@@ -1,0 +1,78 @@
+# Windows portable build — one unpack-and-run zip, built on demand.
+#
+# Deliberately separate from `release.yml`: that workflow is the shipping
+# pipeline (four platforms, signed installers, a signed updater manifest). This
+# one needs only a Windows runner, touches no GitHub Release, and produces a zip
+# for people who would rather not run an installer.
+#
+# What "portable" costs: the app is never installed, so nothing writes the
+# `papr://` deep-link registration or the updater's installed-app identity.
+# Deep links (the browser extension's "Subscribe in Papr") and in-app
+# auto-update therefore do not work in this build. Everything else — feeds,
+# reader, AI, sync — is the normal app.
+#
+# `--no-bundle` is what keeps this minimal: no MSI/NSIS packaging, and no
+# updater signing artefacts, so the workflow needs no repository secrets.
+
+name: Windows portable
+
+on:
+  workflow_dispatch:
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # No `targets:` — the shipped stable toolchain already carries the host's
+      # x86_64-pc-windows-msvc, so there is nothing extra to download.
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Compiles the desktop binary and skips the bundle step entirely.
+      - name: Build (no installer)
+        run: pnpm tauri build --no-bundle
+
+      # The version names the artifact. `github.ref_name` cannot do that here:
+      # this workflow is dispatch-only, so it would be whichever branch the
+      # person picked rather than the release version.
+      - name: Read version
+        id: version
+        shell: bash
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          # The crate sets `autobins = false` with an explicit `papr-desktop`
+          # [[bin]], and the repository root is the Cargo workspace root, so the
+          # binary lands here rather than under src-tauri/target.
+          $zip = "papr-${{ steps.version.outputs.value }}-windows-portable.zip"
+          Compress-Archive -Path "target/release/papr-desktop.exe" -DestinationPath $zip -Force
+
+      - name: Upload the portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: papr-windows-portable
+          path: papr-*-windows-portable.zip
+          if-no-files-found: error
