@@ -292,9 +292,9 @@
   background: var(--accent);
 }
 
-[data-density="compact"] { --row-py: 10px; --list-px: 14px; --art-thumb-h: 40px; }
-[data-density="cozy"]    { --row-py: 14px; --list-px: 18px; --art-thumb-h: 52px; }
-[data-density="spacious"]{ --row-py: 20px; --list-px: 24px; --art-thumb-h: 66px; }
+[data-density="compact"] { --row-py: 10px; --list-px: 14px; --art-thumb-h: 64px; }
+[data-density="cozy"]    { --row-py: 14px; --list-px: 18px; --art-thumb-h: 76px; }
+[data-density="spacious"]{ --row-py: 20px; --list-px: 24px; --art-thumb-h: 88px; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -815,17 +815,31 @@ button { font-family: inherit; }
   gap: 10px;
 }
 .art-body { flex: 1; min-width: 0; }
-/* Fitted, never cropped: a wide banner keeps its whole width and simply ends up
-   short. The height follows the density, so the thumbnail never makes a row
-   taller than the list's row estimate expects. */
+/* The list thumbnail.
+ *
+ *  Height: the row's text block plus 3px above and below (`--art-thumb-h`).
+ *  Those extra 6px would normally lengthen the row, so a matching negative
+ *  margin (-3px top and bottom) gives them straight back — the image eats into
+ *  the row's own `--row-py` padding instead of pushing the row taller. A row
+ *  with an image stays exactly as tall as the row estimate says.
+ *
+ *  Width: capped at the same value as the height, so it can never exceed the
+ *  height. `width: auto` keeps the image's proportions; when it is wider than
+ *  the cap, `object-fit: cover` fits it by cropping, and
+ *  `object-position: left center` keeps the left edge — only the right side is
+ *  ever cut off.
+ *
+ *  Nothing else is drawn: no border-radius and no background, so the slot shows
+ *  the image and only the image, with no extra visible element added in the
+ *  vertical direction. */
 .art-side-thumb {
-  height: var(--art-thumb-h, 52px);
+  height: var(--art-thumb-h, 76px);
+  margin-block: -3px;
   width: auto;
-  max-width: 40%;
+  max-width: var(--art-thumb-h, 76px);
   flex-shrink: 0;
-  object-fit: contain;
-  border-radius: 6px;
-  background: var(--accent-soft);
+  object-fit: cover;
+  object-position: left center;
 }
 .art:hover { background: var(--hover); }
 .art.active { background: var(--accent-soft); }
