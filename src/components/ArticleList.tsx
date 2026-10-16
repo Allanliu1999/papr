@@ -754,11 +754,16 @@ function CardThumb({ article }: { article: ArticleSummary }) {
 
 /** The article's first body image, shown beside a list row.
  *
- *  CSS sizes it to the row's own height and scales it with `object-fit:
- *  contain`, so a wide image is fitted rather than cropped — unlike the card
- *  thumbnail, where filling the frame reads better. Renders nothing when there
- *  is no image or it fails to load; the row then keeps its full width, because
- *  the indent is driven by this element's presence (`:has()` in styles.css). */
+ *  The box is as tall as the row's own content (title and snippet decide that —
+ *  the image never stretches the row) and capped at 150% of that height in
+ *  width. The image itself is always scaled to the box's full height and keeps
+ *  its own proportions, so nothing is ever cropped vertically; only an image
+ *  wider than the cap overflows and gets clipped horizontally. See the
+ *  `.art-thumb-box` rules in styles.css.
+ *
+ *  Renders nothing when there is no image or it fails to load; the row then
+ *  keeps its full width, because the indent is driven by this element's
+ *  presence (`:has()` in styles.css). */
 function ListThumb({ article }: { article: ArticleSummary }) {
   const [broken, setBroken] = useState(false);
   // The virtualizer recycles this instance across rows — clear the error flag
@@ -768,14 +773,15 @@ function ListThumb({ article }: { article: ArticleSummary }) {
   if (!article.imageUrl || broken) return null;
 
   return (
-    <img
-      className="art-side-thumb"
-      src={article.imageUrl}
-      alt=""
-      loading="lazy"
-      draggable={false}
-      onError={() => setBroken(true)}
-    />
+    <div className="art-thumb-box">
+      <img
+        src={article.imageUrl}
+        alt=""
+        loading="lazy"
+        draggable={false}
+        onError={() => setBroken(true)}
+      />
+    </div>
   );
 }
 

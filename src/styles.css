@@ -292,9 +292,9 @@
   background: var(--accent);
 }
 
-[data-density="compact"] { --row-py: 10px; --list-px: 14px; --art-thumb-h: 40px; }
-[data-density="cozy"]    { --row-py: 14px; --list-px: 18px; --art-thumb-h: 52px; }
-[data-density="spacious"]{ --row-py: 20px; --list-px: 24px; --art-thumb-h: 66px; }
+[data-density="compact"] { --row-py: 10px; --list-px: 14px; }
+[data-density="cozy"]    { --row-py: 14px; --list-px: 18px; }
+[data-density="spacious"]{ --row-py: 20px; --list-px: 24px; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -809,23 +809,45 @@ button { font-family: inherit; }
    sits beside it. Keyed on the element actually being rendered, so a row
    without an image (or whose image failed to load) keeps the full width rather
    than showing an empty gap. */
-.art:has(> .art-side-thumb) {
+.art:has(> .art-thumb-box) {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 10px;
 }
 .art-body { flex: 1; min-width: 0; }
-/* Fitted, never cropped: a wide banner keeps its whole width and simply ends up
-   short. The height follows the density, so the thumbnail never makes a row
-   taller than the list's row estimate expects. */
-.art-side-thumb {
-  height: var(--art-thumb-h, 52px);
-  width: auto;
-  max-width: 40%;
+/* The thumbnail box: as tall as the row's own content (the title and snippet
+   decide that — the image never stretches the row), inset 3px top and bottom so
+   it doesn't sit flush against the row edges. Its width is capped at 150% of
+   that height by the 3:2 aspect ratio, which *is* the "at most 1.5× the height"
+   rule — CSS can't express a max-width measured in the element's own height, so
+   the cap is baked into the box instead. */
+.art-thumb-box {
+  align-self: stretch;
+  margin-block: 3px;
+  aspect-ratio: 3 / 2;
+  max-width: 100%;
+  /* The box is a flex item, whose default `min-width: auto` would size it to the
+     image's intrinsic width — a 1200px photo would blow the row open instead of
+     being capped at 150% of the height. Zeroing it lets the aspect ratio win,
+     and the overflow rule below do the clipping. */
+  min-width: 0;
   flex-shrink: 0;
-  object-fit: contain;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  /* A wider image overflows the box and is clipped — only the width is ever
+     cropped; the height is always shown in full. */
+  overflow: hidden;
   border-radius: 6px;
   background: var(--accent-soft);
+}
+/* Scaled to the box's height, preserving the image's own proportions. A narrow
+   image simply doesn't reach the right edge (the box colour shows through);
+   a wide one overflows and gets clipped by the rule above. */
+.art-thumb-box img {
+  height: 100%;
+  width: auto;
+  display: block;
 }
 .art:hover { background: var(--hover); }
 .art.active { background: var(--accent-soft); }
