@@ -108,6 +108,33 @@ pub fn portable_data_dir() -> PathBuf {
     app_dir().join(PORTABLE_DIR_NAME)
 }
 
+/// Point WebView2's own profile — the home of `localStorage`, where the UI keeps
+/// things like collapsed folders and every appearance preference — at the
+/// portable data folder.
+///
+/// This is deliberately separate from the database: WebView2 owns that
+/// directory, and by default it sits under `%LOCALAPPDATA%\<identifier>`, which
+/// is per-machine. Left alone, a stick-based install would carry the library
+/// fine but show the next computer's stale UI state — or none at all — because
+/// `localStorage` never travelled.
+///
+/// Must run before the first webview is created: WebView2 reads the variable
+/// once at start-up and the profile cannot be moved afterwards.
+///
+/// Windows only. macOS's WKWebView and Linux's WebKitGTK expose no equivalent,
+/// so there the UI preferences still travel through the `webview-prefs.json`
+/// mirror written beside the database.
+pub fn configure_webview_profile() {
+    #[cfg(windows)]
+    {
+        let dir = portable_data_dir().join("webview");
+        if fs::create_dir_all(&dir).is_ok() {
+            // Safe here: called from `run()` before any other thread exists.
+            std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &dir);
+        }
+    }
+}
+
 /// Whether a pre-portable library is sitting in `legacy` while the portable
 /// folder has none — the situation the UI offers to migrate. Read-only.
 pub fn legacy_library_pending(portable: &Path, legacy: &Path) -> bool {

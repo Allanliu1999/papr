@@ -58,6 +58,11 @@ const READ_POOL_SIZE: usize = 4;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First thing: send WebView2's own profile (localStorage, cache) to the
+    // portable data folder. WebView2 reads this at start-up and the profile
+    // cannot be relocated later, so it has to happen before any window exists.
+    location::configure_webview_profile();
+
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())

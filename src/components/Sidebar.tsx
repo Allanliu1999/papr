@@ -307,12 +307,16 @@ export default function Sidebar({
       .catch((e) => reportError(e));
   };
 
-  // `folderId` + `beforeId` fully describe a feed drop: land immediately
-  // before `beforeId` inside `folderId`, or at the end of that group when
-  // `beforeId` is null. Fed by a drop on a row (precise place) and by a drop
-  // on a group container (append).
-  const dropFeed = (folderId: number | null, beforeId: number | null) => {
-    const feed = allFeeds.find((f) => f.id === dragId);
+  // `feedId` + `folderId` + `beforeId` fully describe a feed drop: land
+  // immediately before `beforeId` inside `folderId`, or at the end of that
+  // group when `beforeId` is null. The dragged id is passed in rather than read
+  // from state — see `dropTag`.
+  const dropFeed = (
+    feedId: number,
+    folderId: number | null,
+    beforeId: number | null,
+  ) => {
+    const feed = allFeeds.find((f) => f.id === feedId);
     setDragId(null);
     setDropFolder(null);
     setDropAt(null);
@@ -396,8 +400,9 @@ export default function Sidebar({
 
   // `below` places the dragged folder after the hovered one, so the last slot
   // stays reachable (a drop-above-only rule can never move a row to the end).
-  const dropFolderAt = (targetId: number, below: boolean) => {
-    const from = allFolders.findIndex((fo) => fo.id === folderDragId);
+  // The dragged id is passed in rather than read from state — see `dropTag`.
+  const dropFolderAt = (folderId: number, targetId: number, below: boolean) => {
+    const from = allFolders.findIndex((fo) => fo.id === folderId);
     let to = allFolders.findIndex((fo) => fo.id === targetId);
     setFolderDragId(null);
     setFolderDrop(null);
@@ -410,6 +415,171 @@ export default function Sidebar({
     if (next.map((fo) => fo.id).join(",") === allFolders.map((fo) => fo.id).join(","))
       return;
     persistFolderOrder(next);
+  };
+
+  // ── pointer-driven drag & drop ──
+  //
+  // Sidebar reordering deliberately does *not* use HTML5 drag-and-drop. The
+  // webview's native drag path proved unreliable here: Tauri intercepts OS drops
+  // by default, and even with `dragDropEnabled: false` the rows never started
+  // dragging. Pointer events are plain DOM input and unaffected by any of that,
+  // so the gesture is tracked by hand. Everything downstream — the insertion
+  // point, the indicator, the optimistic update, persistence — is shared with
+  // the menus' move-up/down commands.
+  const DRAG_THRESHOLD = 4;
+
+  /** Live drag state. A ref, not state: `pointermove` fires per pixel and must
+   *  not re-render the sidebar. The *drop target* does go through state below,
+   *  because it drives the indicator. */
+  const dragRef = useRef<{
+    kind: "feed" | "folder" | "tag";
+    id: number;
+    startX: number;
+    startY: number;
+    started: boolean;
+    /** Resolved during `pointermove`; read on release. */
+    drop: { folderId: number | null; beforeId: number | null } | null;
+    overFolder: { id: number; below: boolean } | null;
+    overTag: number | null;
+  } | null>(null);
+
+  /** Set when a real drag ends, so the click produced by the release doesn't
+   *  also select the row that was just dropped. Cleared on the next tick. */
+  const suppressClick = useRef(false);
+
+  const beginDrag =
+    (kind: "feed" | "folder" | "tag", id: number) => (e: React.PointerEvent) => {
+      if (e.button !== 0) return; // left button only
+      dragRef.current = {
+        kind,
+        id,
+        startX: e.clientX,
+        startY: e.clientY,
+        started: false,
+        drop: null,
+        overFolder: null,
+        overTag: null,
+      };
+      // Capture so move/up keep arriving once the pointer leaves this row.
+      e.currentTarget.setPointerCapture(e.pointerId);
+    };
+
+  const moveDrag = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    if (!d.started) {
+      // Wait for the threshold: a plain click must still select the row.
+      if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD)
+        return;
+      d.started = true;
+      if (d.kind === "feed") setDragId(d.id);
+      else if (d.kind === "folder") setFolderDragId(d.id);
+      else setTagDragId(d.id);
+    }
+
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+
+    if (d.kind === "folder") {
+      const header = hit?.closest<HTMLElement>("[data-sb-folder]");
+      const overId = header ? Number(header.dataset.sbFolder) : NaN;
+      if (!header || overId === d.id) {
+        d.overFolder = null;
+        setFolderDrop(null);
+        return;
+      }
+      const box = header.getBoundingClientRect();
+      d.overFolder = { id: overId, below: e.clientY > box.top + box.height / 2 };
+      setFolderDrop(d.overFolder);
+      return;
+    }
+
+    if (d.kind === "tag") {
+      const row = hit?.closest<HTMLElement>("[data-sb-tag]");
+      const overId = row ? Number(row.dataset.sbTag) : NaN;
+      const target = !row || overId === d.id ? null : overId;
+      d.overTag = target;
+      setTagOverId(target);
+      return;
+    }
+
+    // ── feed ──
+    // Over another feed row: a precise insertion point, above or below it.
+    const row = hit?.closest<HTMLElement>("[data-sb-feed]");
+    if (row) {
+      const overId = Number(row.dataset.sbFeed);
+      const over = allFeeds.find((f) => f.id === overId);
+      if (!over || overId === d.id) return; // its own row: keep the current target
+      const box = row.getBoundingClientRect();
+      const below = e.clientY > box.top + box.height / 2;
+      // The point after this row is the next row of the same group, and `null`
+      // once there is none — meaning "end of the group". The dragged feed is
+      // excluded so the index matches the post-move list.
+      const group = allFeeds.filter(
+        (x) => x.folderId === over.folderId && x.id !== d.id,
+      );
+      const i = group.findIndex((x) => x.id === over.id);
+      d.drop = {
+        folderId: over.folderId,
+        beforeId: below ? group[i + 1]?.id ?? null : over.id,
+      };
+      setDropAt(d.drop);
+      setDropFolder(null);
+      return;
+    }
+    // Over a group container — an empty folder, or the gap below its last row:
+    // highlight the whole group and append to its end.
+    const group = hit?.closest<HTMLElement>("[data-sb-group]");
+    if (group) {
+      const raw = group.dataset.sbGroup ?? "none";
+      const folderId = raw === "none" ? null : Number(raw);
+      d.drop = { folderId, beforeId: null };
+      setDropAt(null);
+      setDropFolder(folderId === null ? "none" : folderId);
+      return;
+    }
+    // Nowhere droppable — clear the indicators.
+    d.drop = null;
+    setDropAt(null);
+    setDropFolder(null);
+  };
+
+  const endDrag = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    // Never crossed the threshold: not a drag, so let the click through.
+    if (!d || !d.started) return;
+    suppressClick.current = true;
+    window.setTimeout(() => {
+      suppressClick.current = false;
+    }, 0);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+
+    if (d.kind === "feed") {
+      if (!d.drop) {
+        // Released outside any drop target: just clear the drag.
+        setDragId(null);
+        setDropFolder(null);
+        setDropAt(null);
+        return;
+      }
+      dropFeed(d.id, d.drop.folderId, d.drop.beforeId);
+      return;
+    }
+    if (d.kind === "folder") {
+      if (d.overFolder) dropFolderAt(d.id, d.overFolder.id, d.overFolder.below);
+      else {
+        setFolderDragId(null);
+        setFolderDrop(null);
+      }
+      return;
+    }
+    if (d.overTag != null) dropTag(d.id, d.overTag);
+    else {
+      setTagDragId(null);
+      setTagOverId(null);
+    }
   };
 
   // ── feed / folder context menus ──
@@ -672,8 +842,11 @@ export default function Sidebar({
   };
 
   // ── drag to reorder tags ──
-  const dropTag = (targetId: number) => {
-    const from = allTags.findIndex((tg) => tg.id === tagDragId);
+  // Drop the tag `tagId` onto `targetId`, landing *before* it. The dragged id
+  // is passed in rather than read from state: the pointer handlers know it, and
+  // relying on a state update having landed first is a needless race.
+  const dropTag = (tagId: number, targetId: number) => {
+    const from = allTags.findIndex((tg) => tg.id === tagId);
     const to = allTags.findIndex((tg) => tg.id === targetId);
     setTagDragId(null);
     setTagOverId(null);
@@ -721,54 +894,15 @@ export default function Sidebar({
       role="button"
       tabIndex={0}
       aria-current={isActive({ kind: "feed", value: f.id }) || undefined}
-      draggable
-      onDragStart={(e) => {
-        // HTML5 dragging does not start at all unless the source puts something
-        // in the dataTransfer: Firefox enforces it, and WebView2 is not
-        // guaranteed to be lenient. The payload is never read — the drop
-        // handlers work off the ids held in React state — so any non-empty
-        // entry will do.
-        e.dataTransfer.setData("text/plain", String(f.id));
-        e.dataTransfer.effectAllowed = "move";
-        setDragId(f.id);
+      data-sb-feed={f.id}
+      onPointerDown={beginDrag("feed", f.id)}
+      onPointerMove={moveDrag}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onClick={() => {
+        if (suppressClick.current) return;
+        select({ kind: "feed", value: f.id }, f.title);
       }}
-      onDragEnd={() => {
-        setDragId(null);
-        setDropFolder(null);
-        setDropAt(null);
-      }}
-      onDragOver={(e) => {
-        // Ignore this row while it is the dragged one, and whenever a *folder*
-        // is being dragged (that gesture sorts folders, not feeds).
-        if (dragId == null || dragId === f.id) return;
-        e.preventDefault();
-        // Claim the event, so the enclosing group container doesn't also read
-        // the pointer as "over the group, not over a row" (append to the end).
-        e.stopPropagation();
-        const box = e.currentTarget.getBoundingClientRect();
-        const below = e.clientY > box.top + box.height / 2;
-        // The point *after* this row is the next row of the same group — and
-        // `null` once there is none, meaning "end of the group". The dragged
-        // feed is excluded so the index matches the post-move list.
-        const group = allFeeds.filter(
-          (x) => x.folderId === f.folderId && x.id !== dragId,
-        );
-        const i = group.findIndex((x) => x.id === f.id);
-        setDropAt({
-          folderId: f.folderId,
-          beforeId: below ? group[i + 1]?.id ?? null : f.id,
-        });
-        setDropFolder(null);
-      }}
-      onDrop={(e) => {
-        if (dragId == null) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const beforeId =
-          dropAt && dropAt.folderId === f.folderId ? dropAt.beforeId : null;
-        dropFeed(f.folderId, beforeId);
-      }}
-      onClick={() => select({ kind: "feed", value: f.id }, f.title)}
       onKeyDown={onActivate(() => select({ kind: "feed", value: f.id }, f.title))}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -907,16 +1041,7 @@ export default function Sidebar({
           (dragId != null &&
             allFeeds.find((f) => f.id === dragId)?.folderId != null)) && (
           <div
-            onDragOver={(e) => {
-              if (dragId != null) {
-                e.preventDefault();
-                setDropFolder("none");
-                // The pointer is over the group, not over a row: fall back to
-                // "append to the end" and clear any row-level indicator.
-                setDropAt(null);
-              }
-            }}
-            onDrop={() => dropFeed(null, null)}
+            data-sb-group="none"
             style={
               dropFolder === "none"
                 ? { outline: "2px solid var(--accent)", borderRadius: 8 }
@@ -954,15 +1079,7 @@ export default function Sidebar({
           return (
             <div
               key={folder.id}
-              onDragOver={(e) => {
-                if (dragId != null) {
-                  e.preventDefault();
-                  setDropFolder(folder.id);
-                  // Over the group, not over one of its rows: append to end.
-                  setDropAt(null);
-                }
-              }}
-              onDrop={() => dropFeed(folder.id, null)}
+              data-sb-group={folder.id}
               style={
                 dropFolder === folder.id
                   ? { outline: "2px solid var(--accent)", borderRadius: 8 }
@@ -982,43 +1099,15 @@ export default function Sidebar({
                 role="button"
                 tabIndex={0}
                 aria-current={folderActive || undefined}
-                draggable
-                onDragStart={(e) => {
-                  // HTML5 dragging does not start at all unless the source puts
-                  // something in the dataTransfer: Firefox enforces it, and
-                  // WebView2 is not guaranteed to be lenient. The payload is
-                  // never read — the drop handlers work off React state.
-                  e.dataTransfer.setData("text/plain", String(folder.id));
-                  e.dataTransfer.effectAllowed = "move";
-                  setFolderDragId(folder.id);
+                data-sb-folder={folder.id}
+                onPointerDown={beginDrag("folder", folder.id)}
+                onPointerMove={moveDrag}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+                onClick={() => {
+                  if (suppressClick.current) return;
+                  select({ kind: "folder", value: folder.id }, folder.name);
                 }}
-                onDragEnd={() => {
-                  setFolderDragId(null);
-                  setFolderDrop(null);
-                }}
-                onDragOver={(e) => {
-                  // Only a folder drag sorts folders. A *feed* drag passing
-                  // over this header is left to the enclosing container, which
-                  // reads it as "drop the feed into this folder".
-                  if (folderDragId == null || folderDragId === folder.id) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  const box = e.currentTarget.getBoundingClientRect();
-                  setFolderDrop({
-                    id: folder.id,
-                    below: e.clientY > box.top + box.height / 2,
-                  });
-                }}
-                onDrop={(e) => {
-                  if (folderDragId == null) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  dropFolderAt(
-                    folder.id,
-                    folderDrop?.id === folder.id ? folderDrop.below : false,
-                  );
-                }}
-                onClick={() => select({ kind: "folder", value: folder.id }, folder.name)}
                 onKeyDown={onActivate(() =>
                   select({ kind: "folder", value: folder.id }, folder.name),
                 )}
@@ -1087,29 +1176,15 @@ export default function Sidebar({
             role="button"
             tabIndex={0}
             aria-current={isActive({ kind: "tag", value: tag.id }) || undefined}
-            draggable
-            onDragStart={(e) => {
-              // HTML5 dragging does not start at all unless the source puts
-              // something in the dataTransfer: Firefox enforces it, and
-              // WebView2 is not guaranteed to be lenient. The payload is never
-              // read — the drop handlers work off the ids held in React state
-              // — so any non-empty entry will do.
-              e.dataTransfer.setData("text/plain", String(tag.id));
-              e.dataTransfer.effectAllowed = "move";
-              setTagDragId(tag.id);
+            data-sb-tag={tag.id}
+            onPointerDown={beginDrag("tag", tag.id)}
+            onPointerMove={moveDrag}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            onClick={() => {
+              if (suppressClick.current) return;
+              select({ kind: "tag", value: tag.id }, tag.name);
             }}
-            onDragEnd={() => {
-              setTagDragId(null);
-              setTagOverId(null);
-            }}
-            onDragOver={(e) => {
-              if (tagDragId != null && tagDragId !== tag.id) {
-                e.preventDefault();
-                setTagOverId(tag.id);
-              }
-            }}
-            onDrop={() => dropTag(tag.id)}
-            onClick={() => select({ kind: "tag", value: tag.id }, tag.name)}
             onKeyDown={onActivate(() =>
               select({ kind: "tag", value: tag.id }, tag.name),
             )}
