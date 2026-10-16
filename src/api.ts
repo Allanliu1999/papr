@@ -403,14 +403,26 @@ export const configureAiProvider = (provider: string, model?: string, baseUrl?: 
  *  (plus whether a pin had to be fallen back from). */
 export interface DataLocation {
   dir: string;
+  /** The per-user directory: the fallback when the portable one can't be used. */
   defaultDir: string;
-  /** What a portable install would use: a `data` folder beside the executable.
-   *  Shown as the suggested value so the relative form is discoverable. */
+  /** The portable default — a `Data` folder beside the executable. Offered as
+   *  the suggested value so the relative form is discoverable. */
   suggestedDir: string;
   custom: boolean;
   fellBack: boolean;
+  /** The portable `Data` folder could not be created (an installed build under
+   *  Program Files); the per-user directory is in use instead. */
+  portableUnavailable: boolean;
+  /** A library is still sitting in the per-user directory while the portable
+   *  one has none — the case the startup prompt offers to migrate. */
+  legacyLibraryAvailable: boolean;
 }
 export const getDataLocation = () => invoke<DataLocation>("get_data_location");
+
+/** The library left at the per-user location, if the portable folder has none.
+ *  `null` means there is nothing to migrate. Read-only. */
+export const legacyLibraryPending = () =>
+  invoke<string | null>("legacy_library_pending");
 
 /** Inspect a candidate directory before writing anything into it. */
 export interface DataDirProbe {

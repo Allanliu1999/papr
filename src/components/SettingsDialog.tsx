@@ -1746,6 +1746,20 @@ function DangerZone({ onToast }: { onToast: (m: string) => void }) {
           {t("settings.advanced.dataLocationFellBack", { dir: dataLoc.dir })}
         </p>
       )}
+      {dataLoc?.portableUnavailable && (
+        <p
+          style={{
+            margin: "0 0 10px",
+            fontSize: 12.5,
+            color: "var(--danger)",
+            lineHeight: 1.5,
+          }}
+        >
+          {t("settings.advanced.dataLocationPortableUnavailable", {
+            dir: dataLoc.suggestedDir,
+          })}
+        </p>
+      )}
       {/* How to type a path — the relative form is what keeps a portable
           install working when the drive letter changes. */}
       <p

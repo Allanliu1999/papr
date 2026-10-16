@@ -722,7 +722,16 @@ export default function Sidebar({
       tabIndex={0}
       aria-current={isActive({ kind: "feed", value: f.id }) || undefined}
       draggable
-      onDragStart={() => setDragId(f.id)}
+      onDragStart={(e) => {
+        // HTML5 dragging does not start at all unless the source puts something
+        // in the dataTransfer: Firefox enforces it, and WebView2 is not
+        // guaranteed to be lenient. The payload is never read — the drop
+        // handlers work off the ids held in React state — so any non-empty
+        // entry will do.
+        e.dataTransfer.setData("text/plain", String(f.id));
+        e.dataTransfer.effectAllowed = "move";
+        setDragId(f.id);
+      }}
       onDragEnd={() => {
         setDragId(null);
         setDropFolder(null);
@@ -974,7 +983,15 @@ export default function Sidebar({
                 tabIndex={0}
                 aria-current={folderActive || undefined}
                 draggable
-                onDragStart={() => setFolderDragId(folder.id)}
+                onDragStart={(e) => {
+                  // HTML5 dragging does not start at all unless the source puts
+                  // something in the dataTransfer: Firefox enforces it, and
+                  // WebView2 is not guaranteed to be lenient. The payload is
+                  // never read — the drop handlers work off React state.
+                  e.dataTransfer.setData("text/plain", String(folder.id));
+                  e.dataTransfer.effectAllowed = "move";
+                  setFolderDragId(folder.id);
+                }}
                 onDragEnd={() => {
                   setFolderDragId(null);
                   setFolderDrop(null);
@@ -1071,7 +1088,16 @@ export default function Sidebar({
             tabIndex={0}
             aria-current={isActive({ kind: "tag", value: tag.id }) || undefined}
             draggable
-            onDragStart={() => setTagDragId(tag.id)}
+            onDragStart={(e) => {
+              // HTML5 dragging does not start at all unless the source puts
+              // something in the dataTransfer: Firefox enforces it, and
+              // WebView2 is not guaranteed to be lenient. The payload is never
+              // read — the drop handlers work off the ids held in React state
+              // — so any non-empty entry will do.
+              e.dataTransfer.setData("text/plain", String(tag.id));
+              e.dataTransfer.effectAllowed = "move";
+              setTagDragId(tag.id);
+            }}
             onDragEnd={() => {
               setTagDragId(null);
               setTagOverId(null);

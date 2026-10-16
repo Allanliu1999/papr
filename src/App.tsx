@@ -22,10 +22,13 @@ import SettingsDialog from "./components/SettingsDialog";
 import AddFeedDialog from "./components/AddFeedDialog";
 import ExploreDialog from "./components/ExploreDialog";
 import PromptDialog from "./components/PromptDialog";
+import ConfirmDialog from "./components/ConfirmDialog";
 import PlayerBar from "./components/PlayerBar";
 import ResizeHandle from "./components/ResizeHandle";
 import Icon from "./components/Icon";
 import { PANEL_BOUNDS } from "./store";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { dumpPrefs, flushPrefs } from "./lib/prefsSync";
 
 // The accent per (palette, mode), fed to --accent / --accent-soft / --accent-ink.
 // `accent` is the mark, `soft` the active-row/selection wash, `ink` text on that
@@ -243,10 +246,14 @@ export default function App() {
   // Article-action failures route to an error toast, not a silent default one.
   const actions = useArticleActions(toastApi.error);
 
-  // If the pinned data directory was unreachable at launch (a USB stick that
-  // isn't plugged in), the backend quietly fell back to the default one. Say so
-  // once — otherwise the user just sees an empty or stale library with no
-  // explanation. Settings → Advanced repeats this with the path and a way back.
+  // The library still sitting in the old per-user directory, when the portable
+  // folder beside the program has none. Held here so the startup prompt can
+  // offer to bring it over.
+  const [legacyMigration, setLegacyMigration] = useState<string | null>(null);
+
+  // Report launch-time data-location conditions once: an unreachable pinned
+  // location, and a library left in the old per-user directory — which is what
+  // makes a stick-based install actually carry the data with it.
   useEffect(() => {
     api
       .getDataLocation()
@@ -255,10 +262,31 @@ export default function App() {
           toastApi.error(t("settings.advanced.dataLocationFellBack", { dir: loc.dir }));
       })
       .catch(() => {});
-    // Runs once on mount: this reports a launch-time condition, and re-running
-    // on a language change would only repeat the same notice.
+    api
+      .legacyLibraryPending()
+      .then((legacy) => {
+        if (legacy) setLegacyMigration(legacy);
+      })
+      .catch(() => {});
+    // Runs once on mount: these report launch-time conditions, and re-running
+    // on a language change would only repeat the same notices.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Copy the leftover library beside the program, then relaunch — the open
+  // database connection can't follow the move. The original is left in place,
+  // so declining (or a failure) loses nothing.
+  const migrateLegacyLibrary = async () => {
+    try {
+      flushPrefs();
+      const loc = await api.getDataLocation();
+      await api.setDataLocation(loc.suggestedDir, "copy", dumpPrefs());
+      toastApi.show(t("settings.advanced.dataLocationMoved"));
+      setTimeout(() => void relaunch(), 900);
+    } catch (e) {
+      reportError(e);
+    }
+  };
 
   // ── background refresh events from the Rust scheduler ──
   useEffect(() => {
@@ -636,6 +664,22 @@ export default function App() {
               .catch(reportError)
           }
           onClose={() => setNewFolder(false)}
+        />
+      )}
+
+      {/* A library left in the old per-user folder: offer to copy it beside the
+          program so the install becomes portable. Declining keeps everything
+          where it was; nothing is ever moved or deleted. */}
+      {legacyMigration && (
+        <ConfirmDialog
+          title={t("settings.advanced.legacyMigrateTitle")}
+          message={t("settings.advanced.legacyMigrateMessage", {
+            dir: legacyMigration,
+          })}
+          confirmLabel={t("settings.advanced.legacyMigrateConfirm")}
+          danger={false}
+          onConfirm={() => void migrateLegacyLibrary()}
+          onClose={() => setLegacyMigration(null)}
         />
       )}
 

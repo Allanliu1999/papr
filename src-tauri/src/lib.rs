@@ -23,7 +23,7 @@ use ingestion::discovery::{self, DeepLink};
 use state::AppState;
 use std::fs;
 use tauri::{Emitter, Manager};
-use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 /// Handle every URL delivered through the `papr://` deep-link scheme. A
 /// `papr://subscribe?url=…` link focuses the main window and emits a
@@ -88,8 +88,39 @@ pub fn run() {
             // back to the default rather than refusing to start, so the app is
             // always launchable and the user can point it back from Settings.
             let config_dir = app.path().app_config_dir()?;
-            let default_data_dir = app.path().app_data_dir()?;
-            let resolved = location::resolve(&config_dir, &default_data_dir);
+            // The per-user directory older installs used — now only the
+            // fallback when the portable default can't be created.
+            let legacy_data_dir = app.path().app_data_dir()?;
+            let resolved = location::resolve(&config_dir, &legacy_data_dir);
+
+            // The `Data` folder beside the executable could not be created: an
+            // installed build lives under Program Files, which is not writable.
+            // Ask rather than decide — silently falling back hides why the data
+            // isn't where the user put the program, and quitting outright would
+            // lock out every installed copy.
+            if resolved.portable_unavailable {
+                let use_default = app
+                    .dialog()
+                    .message(format!(
+                        "Papr normally keeps its data in a \"Data\" folder next to the program, \
+                         so it can travel on a USB stick.\n\n\
+                         That folder could not be created here — the program is probably \
+                         installed somewhere read-only, such as Program Files.\n\n\
+                         Use the default per-user location instead?\n\n{}",
+                        resolved.dir.display()
+                    ))
+                    .title("Papr — Portable data folder unavailable")
+                    .kind(MessageDialogKind::Warning)
+                    .buttons(MessageDialogButtons::OkCancelCustom(
+                        "Use the default location".into(),
+                        "Quit".into(),
+                    ))
+                    .blocking_show();
+                if !use_default {
+                    app.handle().exit(1);
+                    return Ok(());
+                }
+            }
 
             // ── Database ──────────────────────────────────────────────
             let opened = (|| -> Result<_, Box<dyn std::error::Error>> {
@@ -142,7 +173,7 @@ pub fn run() {
                 readers,
                 http,
                 config_dir,
-                default_data_dir,
+                legacy_data_dir,
                 resolved.dir.clone(),
             ));
 
@@ -320,6 +351,7 @@ pub fn run() {
             commands::probe_data_dir,
             commands::set_data_location,
             commands::reset_data_location,
+            commands::legacy_library_pending,
             commands::read_webview_prefs,
             commands::write_webview_prefs,
             commands::list_tags,

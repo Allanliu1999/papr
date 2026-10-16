@@ -1410,15 +1410,22 @@ pub async fn take_pending_deep_link(state: State<'_, AppState>) -> AppResult<Opt
 #[serde(rename_all = "camelCase")]
 pub struct DataLocation {
     dir: String,
+    /// The per-user directory, kept as the fallback target and shown in the UI.
     default_dir: String,
-    /// What the portable option resolves to: a `data` folder beside the
-    /// executable. Offered as the placeholder in the settings prompt so the
-    /// relative form is discoverable; nothing uses it implicitly.
+    /// The portable default: a `Data` folder beside the executable. Offered as
+    /// the suggested value so the relative form is discoverable.
     suggested_dir: String,
     /// A directory is pinned, even if it is currently unusable.
     custom: bool,
     /// A pin was set but unreachable, so `dir` is the default one.
     fell_back: bool,
+    /// The portable `Data` folder could not be created (an installed build
+    /// under Program Files), so the per-user directory is in use. The startup
+    /// dialog already asked; Settings repeats it with the path.
+    portable_unavailable: bool,
+    /// A library still sits in the per-user directory while the portable one
+    /// has none — the case the startup prompt offers to migrate.
+    legacy_library_available: bool,
 }
 
 #[tauri::command]
@@ -1432,7 +1439,22 @@ pub async fn get_data_location(state: State<'_, AppState>) -> AppResult<DataLoca
             .into_owned(),
         custom: resolved.custom,
         fell_back: resolved.fell_back,
+        portable_unavailable: resolved.portable_unavailable,
+        legacy_library_available: resolved.legacy_library_available,
     })
+}
+
+/// The library still sitting at the per-user location, when there is one and
+/// the portable folder has none. `Some(path)` tells the UI to offer bringing it
+/// over; nothing is copied here — this is a read-only check.
+#[tauri::command]
+pub async fn legacy_library_pending(state: State<'_, AppState>) -> AppResult<Option<String>> {
+    let portable = crate::location::portable_data_dir();
+    if crate::location::legacy_library_pending(&portable, &state.default_data_dir) {
+        Ok(Some(state.default_data_dir.to_string_lossy().into_owned()))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Inspect a candidate directory *before* anything is written: is it usable,

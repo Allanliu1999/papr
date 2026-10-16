@@ -35,6 +35,9 @@ const POINTER_FILE: &str = "data-location.json";
 pub const DB_FILE: &str = "papr.db";
 /// UI preferences that travel beside the database.
 const PREFS_FILE: &str = "webview-prefs.json";
+/// The folder Papr keeps its data in by default, beside the executable. Named
+/// as shown in the UI, so the two never disagree about capitalisation.
+pub const PORTABLE_DIR_NAME: &str = "Data";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +54,14 @@ pub struct Resolved {
     /// A custom directory was pinned but could not be used, so `dir` is the
     /// default one. The UI surfaces this so the fallback isn't silent.
     pub fell_back: bool,
+    /// The default — a `Data` folder beside the executable — could not be
+    /// created, so the legacy per-user directory is in use instead. Typically
+    /// means an installed build: Windows puts those under `Program Files`,
+    /// which is not writable. The caller asks the user what to do.
+    pub portable_unavailable: bool,
+    /// The legacy directory still holds a library and the portable one does
+    /// not, so there is something the user could migrate. The UI offers it.
+    pub legacy_library_available: bool,
 }
 
 /// The pointer file's path inside `config_dir`.
@@ -86,32 +97,78 @@ pub fn expand_input(input: &str) -> PathBuf {
     }
 }
 
-/// The default *suggestion* for a portable install: `data` beside the
-/// executable. Offered as the placeholder in Settings so the relative form —
-/// and what it resolves to — is discoverable. Nothing uses it implicitly.
+/// The default data directory: a `Data` folder beside the executable.
+///
+/// This is what makes a portable install work — app and library live together
+/// on the same stick, so the whole thing keeps working whatever drive letter it
+/// gets on the next machine. `resolve` falls back to the legacy per-user
+/// directory when this folder can't be created at all (an installed build under
+/// `Program Files`).
 pub fn portable_data_dir() -> PathBuf {
-    app_dir().join("data")
+    app_dir().join(PORTABLE_DIR_NAME)
 }
 
-/// Resolve the data directory: the pinned one when it is usable, otherwise the
-/// default. Never fails — an unusable pin degrades to `fell_back`.
-pub fn resolve(config_dir: &Path, default_dir: &Path) -> Resolved {
-    match read_pointer(config_dir) {
-        Some(dir) if is_usable(&dir) => Resolved {
-            dir,
-            custom: true,
-            fell_back: false,
-        },
-        Some(_) => Resolved {
-            dir: default_dir.to_path_buf(),
-            custom: true,
-            fell_back: true,
-        },
-        None => Resolved {
-            dir: default_dir.to_path_buf(),
+/// Whether a pre-portable library is sitting in `legacy` while the portable
+/// folder has none — the situation the UI offers to migrate. Read-only.
+pub fn legacy_library_pending(portable: &Path, legacy: &Path) -> bool {
+    !portable.join(DB_FILE).exists() && legacy.join(DB_FILE).is_file()
+}
+
+/// Resolve the data directory, in order of preference:
+///
+/// 1. a directory the user pinned explicitly (Settings → Advanced);
+/// 2. the portable default — a `Data` folder beside the executable;
+/// 3. `legacy_dir`, the per-user directory older installs used, when the
+///    portable one cannot be created at all.
+///
+/// Never fails. An unusable pin degrades to `fell_back`; an unusable portable
+/// default degrades to the legacy directory with `portable_unavailable` set, so
+/// the caller can ask the user instead of silently choosing for them.
+pub fn resolve(config_dir: &Path, legacy_dir: &Path) -> Resolved {
+    let portable = portable_data_dir();
+
+    // 1. An explicit pin wins — including one that failed, which is reported
+    //    rather than quietly replaced.
+    if let Some(pinned) = read_pointer(config_dir) {
+        return if is_usable(&pinned) {
+            Resolved {
+                dir: pinned,
+                custom: true,
+                fell_back: false,
+                portable_unavailable: false,
+                legacy_library_available: false,
+            }
+        } else {
+            Resolved {
+                dir: legacy_dir.to_path_buf(),
+                custom: true,
+                fell_back: true,
+                portable_unavailable: false,
+                legacy_library_available: false,
+            }
+        };
+    }
+
+    // 2. The portable default. `is_usable` creates the folder, so a read-only
+    //    install location fails here rather than at the first write.
+    if is_usable(&portable) {
+        return Resolved {
+            dir: portable.clone(),
             custom: false,
             fell_back: false,
-        },
+            portable_unavailable: false,
+            legacy_library_available: legacy_library_pending(&portable, legacy_dir),
+        };
+    }
+
+    // 3. Could not create it — an installed build under Program Files. Fall back
+    //    to the legacy directory and let the caller surface the choice.
+    Resolved {
+        dir: legacy_dir.to_path_buf(),
+        custom: false,
+        fell_back: false,
+        portable_unavailable: true,
+        legacy_library_available: false,
     }
 }
 
@@ -295,14 +352,36 @@ mod tests {
         );
     }
 
+    /// With no pin, the default is the `Data` folder beside the executable —
+    /// that is what makes a stick-based install work on any machine. (The call
+    /// creates that folder under the test binary's directory; harmless.)
     #[test]
-    fn resolve_uses_the_default_without_a_pointer() {
+    fn resolve_defaults_to_the_portable_folder_beside_the_executable() {
         let config = TempDir::new("cfg-none");
-        let default = TempDir::new("def-none");
-        let r = resolve(config.path(), default.path());
-        assert_eq!(r.dir, default.path());
+        let legacy = TempDir::new("legacy-none");
+        let r = resolve(config.path(), legacy.path());
+        assert_eq!(r.dir, portable_data_dir());
         assert!(!r.custom);
         assert!(!r.fell_back);
+        assert!(!r.portable_unavailable);
+        // The legacy directory holds no library here, so nothing is offered.
+        assert!(!r.legacy_library_available);
+    }
+
+    /// A library left behind at the legacy location is flagged so the UI can
+    /// offer to migrate it — and stops being flagged once one exists beside the
+    /// executable.
+    #[test]
+    fn a_legacy_library_is_offered_for_migration() {
+        let portable = TempDir::new("portable-empty");
+        let legacy = TempDir::new("legacy-full");
+        assert!(!legacy_library_pending(portable.path(), legacy.path()));
+
+        fs::write(legacy.path().join(DB_FILE), b"old library").unwrap();
+        assert!(legacy_library_pending(portable.path(), legacy.path()));
+
+        fs::write(portable.path().join(DB_FILE), b"new library").unwrap();
+        assert!(!legacy_library_pending(portable.path(), legacy.path()));
     }
 
     #[test]
