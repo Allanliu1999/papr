@@ -34,5 +34,7 @@ a.out
 *.sw?
 
 # Reasonix agent local state — a per-machine permission log (absolute paths,
-# the commands this workspace has run). Not part of the project.
+# the commands this workspace has run) plus its per-task working directories.
+# Neither is part of the project.
 reasonix.toml
+.reasonix/
