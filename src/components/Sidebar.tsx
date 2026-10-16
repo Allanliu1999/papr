@@ -12,6 +12,7 @@ import Icon, { type IconName } from "./Icon";
 import ContextMenu, { type MenuEntry } from "./ContextMenu";
 import FeedAvatar from "./FeedAvatar";
 import PromptDialog from "./PromptDialog";
+import FeedEditDialog, { type FeedEditPatch } from "./FeedEditDialog";
 
 interface Props {
   onAddFeed: () => void;
@@ -142,6 +143,10 @@ export default function Sidebar({
 
   const [menu, setMenu] = useState<Menu | null>(null);
   const [prompt, setPrompt] = useState<Prompt | null>(null);
+  // The feed whose Edit dialog is open, if any. A whole `Feed` (not just an
+  // id) so the dialog can seed every field and the save path can diff against
+  // the values the user actually saw.
+  const [feedEdit, setFeedEdit] = useState<Feed | null>(null);
   const [dragId, setDragId] = useState<number | null>(null);
   const [dropFolder, setDropFolder] = useState<number | "none" | null>(null);
   const [tagDragId, setTagDragId] = useState<number | null>(null);
@@ -408,6 +413,27 @@ export default function Sidebar({
   };
 
   // ── feed / folder context menus ──
+  //
+  // Apply the edit dialog's result: each field is compared against the feed
+  // the dialog was opened on, so an untouched field never issues a redundant
+  // write (and a save that changed nothing skips the refresh entirely).
+  const saveFeedEdit = (feed: Feed, patch: FeedEditPatch) => {
+    const jobs: Promise<unknown>[] = [];
+    if (patch.title !== feed.title)
+      jobs.push(api.renameFeed(feed.id, patch.title));
+    if (patch.faviconUrl !== feed.faviconUrl)
+      jobs.push(api.setFeedFavicon(feed.id, patch.faviconUrl));
+    if (patch.refreshMinutes !== feed.refreshIntervalMin)
+      jobs.push(api.setFeedRefreshInterval(feed.id, patch.refreshMinutes));
+    if (!jobs.length) return;
+    Promise.all(jobs)
+      .then(() => {
+        actions.refreshAfterBulk();
+        onToast(t("sidebar.toastFeedUpdated"));
+      })
+      .catch((e) => reportError(e));
+  };
+
   const feedMenu = (f: Feed): MenuEntry[] => {
     const moves: MenuEntry[] = allFolders
       .filter((fo) => fo.id !== f.folderId)
@@ -463,15 +489,8 @@ export default function Sidebar({
       { separator: true },
       {
         icon: "settings",
-        label: t("sidebar.renameMenu"),
-        onClick: () =>
-          setPrompt({
-            title: t("sidebar.renameFeedTitle"),
-            initial: f.title,
-            placeholder: t("sidebar.feedNamePlaceholder"),
-            onSubmit: (v) =>
-              guard(api.renameFeed(f.id, v), t("sidebar.toastRenamed")),
-          }),
+        label: t("sidebar.editMenu"),
+        onClick: () => setFeedEdit(f),
       },
       ...(moves.length ? [{ separator: true } as MenuEntry, ...moves] : []),
       { separator: true },
@@ -1144,6 +1163,13 @@ export default function Sidebar({
           placeholder={prompt.placeholder}
           onSubmit={prompt.onSubmit}
           onClose={() => setPrompt(null)}
+        />
+      )}
+      {feedEdit && (
+        <FeedEditDialog
+          feed={feedEdit}
+          onSave={(patch) => saveFeedEdit(feedEdit, patch)}
+          onClose={() => setFeedEdit(null)}
         />
       )}
     </div>

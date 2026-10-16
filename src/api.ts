@@ -82,6 +82,11 @@ export const reorderFolders = (ids: number[]) =>
   invoke<void>("reorder_folders", { ids });
 export const renameFeed = (id: number, title: string) =>
   invoke<void>("rename_feed", { id, title });
+/** Set (or clear) a feed's custom icon. A non-empty URL pins it so later
+ *  refreshes leave it alone; `null` (or a blank string) drops the pin and the
+ *  feed goes back to the site's own favicon. */
+export const setFeedFavicon = (id: number, url: string | null) =>
+  invoke<void>("set_feed_favicon", { id, url });
 /** Set a feed's refresh interval (minutes). `null` follows the global
  *  setting; `525600` opts the feed out of automatic refresh. */
 export const setFeedRefreshInterval = (id: number, minutes: number | null) =>

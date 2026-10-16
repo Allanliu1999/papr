@@ -686,7 +686,9 @@ pub fn set_feed_open_mode(conn: &Connection, id: i64, mode: Option<&str>) -> App
 /// field leaves the stored value untouched. The feed-supplied `title` is
 /// applied only when the user has *not* renamed the feed by hand
 /// (`custom_title = 0`); otherwise `update_feed_meta` would revert a manual
-/// rename on the next poll.
+/// rename on the next poll. The `favicon_url` gets the same protection behind
+/// `custom_favicon`, so an icon the user chose in the edit dialog survives
+/// every later refresh instead of being replaced by the site's own favicon.
 ///
 /// Empty strings are treated exactly like `None` (`NULLIF(?, '')`): `feed-rs`
 /// parses a `<title></title>` element as `Some("")`, and the scheduler's
@@ -711,7 +713,8 @@ pub fn update_feed_meta(
                                ELSE COALESCE(NULLIF(?2, ''), title) END,
             site_url    = COALESCE(NULLIF(?3, ''), site_url),
             description = COALESCE(NULLIF(?4, ''), description),
-            favicon_url = COALESCE(NULLIF(?5, ''), favicon_url)
+            favicon_url = CASE WHEN custom_favicon = 1 THEN favicon_url
+                               ELSE COALESCE(NULLIF(?5, ''), favicon_url) END
          WHERE id = ?1",
         params![id, title, site_url, description, favicon_url],
     )?;
@@ -844,6 +847,26 @@ pub fn rename_feed(conn: &Connection, id: i64, title: &str) -> AppResult<()> {
     conn.execute(
         "UPDATE feeds SET title = ?2, custom_title = 1 WHERE id = ?1",
         params![id, title],
+    )?;
+    Ok(())
+}
+
+/// Set (or clear) a feed's custom icon.
+///
+/// `Some(url)` pins the feed to that image and raises `custom_favicon`, which
+/// `update_feed_meta` honours — otherwise the next refresh would overwrite the
+/// user's choice with the favicon scraped from the site. This is the icon
+/// counterpart of the `custom_title` protection `rename_feed` sets.
+///
+/// `None` clears the pin, so the feed falls back to its letter avatar and the
+/// next refresh re-adopts the site's own favicon. A blank (or whitespace-only)
+/// string is treated exactly like `None`, so the edit dialog can submit an
+/// emptied field verbatim without a separate "reset" call.
+pub fn set_feed_favicon(conn: &Connection, id: i64, url: Option<&str>) -> AppResult<()> {
+    let url = url.map(str::trim).filter(|u| !u.is_empty());
+    conn.execute(
+        "UPDATE feeds SET favicon_url = ?2, custom_favicon = ?3 WHERE id = ?1",
+        params![id, url, i64::from(url.is_some())],
     )?;
     Ok(())
 }
@@ -2778,6 +2801,70 @@ mod tests {
 
         reorder_folders(&conn, &[first, second]).unwrap();
         assert_eq!(order(&conn), vec![first, second]);
+    }
+
+    /// A hand-picked icon must outlive a refresh: the feed document carries
+    /// its own favicon, and `update_feed_meta` would otherwise replace the
+    /// user's choice on the very next poll.
+    #[test]
+    fn custom_favicon_survives_a_refresh() {
+        let (conn, _) = test_db();
+        let feed_id: i64 = conn
+            .query_row("SELECT id FROM feeds", [], |r| r.get(0))
+            .unwrap();
+
+        set_feed_favicon(&conn, feed_id, Some("https://mine.example/icon.png")).unwrap();
+        update_feed_meta(
+            &conn,
+            feed_id,
+            None,
+            None,
+            None,
+            Some("https://site.example/favicon.ico"),
+        )
+        .unwrap();
+
+        let (favicon, custom): (Option<String>, i64) = conn
+            .query_row(
+                "SELECT favicon_url, custom_favicon FROM feeds WHERE id = ?1",
+                params![feed_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(favicon.as_deref(), Some("https://mine.example/icon.png"));
+        assert_eq!(custom, 1);
+    }
+
+    /// Clearing the icon (an emptied field submits as blank) drops the pin, so
+    /// the feed goes back to the site's own favicon on the next refresh.
+    #[test]
+    fn clearing_the_favicon_lets_the_next_refresh_adopt_the_site_icon() {
+        let (conn, _) = test_db();
+        let feed_id: i64 = conn
+            .query_row("SELECT id FROM feeds", [], |r| r.get(0))
+            .unwrap();
+
+        set_feed_favicon(&conn, feed_id, Some("https://mine.example/icon.png")).unwrap();
+        set_feed_favicon(&conn, feed_id, Some("   ")).unwrap();
+        update_feed_meta(
+            &conn,
+            feed_id,
+            None,
+            None,
+            None,
+            Some("https://site.example/favicon.ico"),
+        )
+        .unwrap();
+
+        let (favicon, custom): (Option<String>, i64) = conn
+            .query_row(
+                "SELECT favicon_url, custom_favicon FROM feeds WHERE id = ?1",
+                params![feed_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(favicon.as_deref(), Some("https://site.example/favicon.ico"));
+        assert_eq!(custom, 0);
     }
 
     #[test]

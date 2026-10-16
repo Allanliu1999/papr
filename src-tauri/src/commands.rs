@@ -337,6 +337,19 @@ pub async fn set_feed_auto_translate(
     db::set_feed_auto_translate(&conn, id, enabled)
 }
 
+/// Set (or clear) a feed's custom icon. `Some(url)` pins it — later refreshes
+/// leave it alone; `None` (or a blank string) drops the pin so the feed goes
+/// back to the site's own favicon.
+#[tauri::command]
+pub async fn set_feed_favicon(
+    state: State<'_, AppState>,
+    id: i64,
+    url: Option<String>,
+) -> AppResult<()> {
+    let conn = state.db.lock().await;
+    db::set_feed_favicon(&conn, id, url.as_deref())
+}
+
 /// Set a feed's per-feed open mode — how its articles open in the reader pane.
 /// `None` reverts the feed to the default behaviour (reader view, honouring
 /// the global auto-extract preference).

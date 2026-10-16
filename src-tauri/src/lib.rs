@@ -260,6 +260,7 @@ pub fn run() {
             commands::reorder_folders,
             commands::set_feed_refresh_interval,
             commands::set_feed_auto_translate,
+            commands::set_feed_favicon,
             commands::set_feed_open_mode,
             commands::rename_feed,
             commands::refresh_feeds,
